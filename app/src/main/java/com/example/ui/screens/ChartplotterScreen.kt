@@ -86,6 +86,7 @@ import com.example.data.local.WaypointEntity
 import com.example.data.map.ChartBaseLayer
 import com.example.data.map.MarineTileManager
 import com.example.data.preferences.DepthUnit
+import com.example.data.preferences.FishingMode
 import com.example.data.preferences.SonarSettings
 import com.example.sensors.CompassTelemetry
 import com.example.sensors.GpsTelemetry
@@ -121,17 +122,31 @@ fun ChartplotterScreen(
     // Keep tile rendering crisp (~384-480px) so Pulau Bintan coastline & labels remain sharp
     val baseTilePx = remember(density) { 256.0 * density.density.coerceIn(1.35f, 1.85f) }
 
-    var activeLayer by remember { mutableStateOf(ChartBaseLayer.MARINE_DARK) }
-    var showOpenSeaMap by remember { mutableStateOf(true) }
+    val isShoreMode = settings.fishingMode == FishingMode.SHORE
+    var activeLayer by remember {
+        mutableStateOf(
+            if (isShoreMode) ChartBaseLayer.SATELLITE_REEF else ChartBaseLayer.MARINE_DARK
+        )
+    }
+    var showOpenSeaMap by remember { mutableStateOf(!isShoreMode) }
+    var showCastingRings by remember { mutableStateOf(isShoreMode) }
     var followVessel by remember { mutableStateOf(true) }
     var dropPinMode by remember { mutableStateOf(false) }
     var pendingPinCoords by remember { mutableStateOf<LatLon?>(null) }
 
     var centerLat by remember { mutableDoubleStateOf(gpsTelemetry.latitude) }
     var centerLon by remember { mutableDoubleStateOf(gpsTelemetry.longitude) }
-    // Initial zoom 10.6 frames Pulau Bintan coastline, reefs, and surrounding straits clearly
-    var zoom by remember { mutableDoubleStateOf(10.6) }
+    // Zoom closer when GPS is locked in Shore mode; otherwise frame Pulau Bintan coastline clearly
+    var zoom by remember { mutableDoubleStateOf(if (isShoreMode && gpsTelemetry.isLiveFix) 15.2 else 11.2) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+
+    LaunchedEffect(isShoreMode) {
+        if (isShoreMode) {
+            activeLayer = ChartBaseLayer.SATELLITE_REEF
+            showCastingRings = true
+            zoom = zoom.coerceAtMost(ChartBaseLayer.SATELLITE_REEF.maxZoom.toDouble())
+        }
+    }
 
     // Hue-preserving Marine Dark Mode matrix (invert + 180° hue rotation) for keyless OSM tiles:
     // renders oceans deep nautical navy-blue, land dark slate, forests deep green, and labels crisp white.
@@ -491,7 +506,33 @@ fun ChartplotterScreen(
                 )
             }
 
-            // 6. Live Vessel GPS Marker + Rotating Real-Time Compass Heading Cone
+            // 6. Shore Casting Distance Rings (25m / 50m / 100m at true WebMercator meter scale)
+            if (showCastingRings) {
+                val mpp = WebMercator.metersPerPixel(gpsTelemetry.latitude, zoom, baseTilePx)
+                val ringDistancesMeters = listOf(25.0, 50.0, 100.0)
+                ringDistancesMeters.forEach { distM ->
+                    val radiusPx = (distM / mpp).toFloat()
+                    if (radiusPx in 18f..1600f) {
+                        drawCircle(
+                            color = primaryColor.copy(alpha = 0.65f),
+                            radius = radiusPx,
+                            center = vesselOffset,
+                            style = Stroke(
+                                width = 1.6.dp.toPx(),
+                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f))
+                            )
+                        )
+                        drawContext.canvas.nativeCanvas.drawText(
+                            "${distM.toInt()}m",
+                            vesselOffset.x + 6.dp.toPx(),
+                            vesselOffset.y - radiusPx - 4.dp.toPx(),
+                            routeBadgePaint
+                        )
+                    }
+                }
+            }
+
+            // 7. Live Vessel GPS Marker + Rotating Real-Time Compass Heading Cone
             val accuracyMeters = gpsTelemetry.accuracyMeters
             if (accuracyMeters != null && accuracyMeters > 0f) {
                 val mpp = WebMercator.metersPerPixel(gpsTelemetry.latitude, zoom, baseTilePx)
@@ -590,6 +631,36 @@ fun ChartplotterScreen(
                     testTag = "map_layer_osm_chip"
                 )
                 FilterChip(
+                    selected = showCastingRings,
+                    onClick = {
+                        showCastingRings = !showCastingRings
+                        if (showCastingRings && zoom < 14.5) {
+                            zoom = 15.2
+                            followVessel = true
+                        }
+                    },
+                    label = {
+                        Text(
+                            text = stringResource(R.string.map_casting_rings),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Rounded.CenterFocusStrong,
+                            contentDescription = "Lingkaran jarak lempar 25m 50m 100m",
+                            modifier = Modifier.size(15.dp)
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = surfaceColor.copy(alpha = 0.90f),
+                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f),
+                        selectedLabelColor = MaterialTheme.colorScheme.primary,
+                        selectedLeadingIconColor = MaterialTheme.colorScheme.primary
+                    ),
+                    modifier = Modifier.testTag("map_casting_rings_toggle")
+                )
+                FilterChip(
                     selected = showOpenSeaMap,
                     onClick = { showOpenSeaMap = !showOpenSeaMap },
                     label = {
@@ -613,6 +684,23 @@ fun ChartplotterScreen(
                     ),
                     modifier = Modifier.testTag("map_openseamap_toggle")
                 )
+            }
+
+            if (activeLayer == ChartBaseLayer.SATELLITE_REEF && showCastingRings) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = surfaceColor.copy(alpha = 0.86f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, gridColor.copy(alpha = 0.7f), RoundedCornerShape(10.dp))
+                ) {
+                    Text(
+                        text = stringResource(R.string.map_shore_reef_legend),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = textPrimaryColor,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
             }
 
             // Live Mini Heading & GPS Status Pill
