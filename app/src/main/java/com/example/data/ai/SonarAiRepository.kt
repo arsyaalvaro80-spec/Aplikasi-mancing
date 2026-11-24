@@ -244,7 +244,16 @@ class FirebaseSonarAiRepository : SonarAiRepository {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Firebase AI marine analysis failed", e)
-            Result.failure(e)
+            val msg = e.localizedMessage.orEmpty()
+            val friendly = if (msg.contains("Default FirebaseApp is not initialized", ignoreCase = true)) {
+                IllegalStateException(
+                    "Konfigurasi Firebase (app/google-services.json) belum ikut terbawa saat build APK di GitHub. " +
+                        "Tambahkan file google-services.json (atau Secret GOOGLE_SERVICES_JSON) di repo GitHub lalu build ulang APK."
+                )
+            } else {
+                e
+            }
+            Result.failure(friendly)
         }
     }
 
@@ -318,7 +327,16 @@ class FirebaseSonarAiRepository : SonarAiRepository {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Firebase AI sonar vision analysis failed", e)
-            Result.failure(e)
+            val msg = e.localizedMessage.orEmpty()
+            val friendly = if (msg.contains("Default FirebaseApp is not initialized", ignoreCase = true)) {
+                IllegalStateException(
+                    "Konfigurasi Firebase (app/google-services.json) belum ikut terbawa saat build APK di GitHub. " +
+                        "Tambahkan file google-services.json (atau Secret GOOGLE_SERVICES_JSON) di repo GitHub lalu build ulang APK."
+                )
+            } else {
+                e
+            }
+            Result.failure(friendly)
         }
     }
 

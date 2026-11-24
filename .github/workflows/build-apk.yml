@@ -39,6 +39,20 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+      - name: Verify or restore google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ ! -f app/google-services.json ] && [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
+            echo "Restored app/google-services.json from GitHub Secret."
+          fi
+          if [ ! -f app/google-services.json ]; then
+            echo "::warning::app/google-services.json belum ada di repo. Tambahkan secret GOOGLE_SERVICES_JSON atau upload app/google-services.json agar Firebase Gemini AI aktif di APK."
+          else
+            echo "app/google-services.json ditemukan dan siap dipaketkan ke APK."
+          fi
+
       - name: Build Debug APK
         run: gradle :app:assembleDebug --no-daemon
 
