@@ -1,0 +1,6 @@
+{
+  "name": "Bintan Sonar AI",
+  "description": "Asisten radar sonar & spot mancing pintar bergaya fishfinder Garmin dengan prediksi cuaca laut AI, waypoint GPS, kompas real-time, dan analisis kamera fishfinder.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

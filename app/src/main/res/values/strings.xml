@@ -1,0 +1,84 @@
+<resources>
+    <string name="app_name">Bintan Sonar AI</string>
+
+    <!-- Navigation Labels -->
+    <string name="nav_radar">Radar</string>
+    <string name="nav_map">Peta</string>
+    <string name="nav_waypoints">Spot</string>
+    <string name="nav_sonar_camera">Kamera</string>
+    <string name="nav_settings">Setelan</string>
+
+    <!-- Chartplotter Map Screen -->
+    <string name="map_title">PETA CHARTPLOTTER</string>
+    <string name="map_layer_dark">Laut Dark</string>
+    <string name="map_layer_satellite">Satelit Karang</string>
+    <string name="map_layer_osm">OSM</string>
+    <string name="map_overlay_openseamap">OpenSeaMap</string>
+    <string name="map_drop_pin_hint">Ketuk peta untuk menandai spot baru</string>
+    <string name="map_follow_gps">Ikuti GPS</string>
+    <string name="map_view_on_chart">Lihat di Peta</string>
+
+    <!-- Radar & Prediction Screen -->
+    <string name="radar_title">RADAR SONAR</string>
+    <string name="radar_subtitle">PERAIRAN BINTAN • FISHFINDER HUD</string>
+    <string name="btn_scan_marine">PINDAI KONDISI LAUT</string>
+    <string name="btn_scanning_marine">MEMINDAI DATA LAUT...</string>
+    <string name="gps_status_live">GPS LIVE</string>
+    <string name="gps_status_waiting">MENUNGGU SINYAL GPS</string>
+    <string name="gps_status_bintan_ref">REFERENSI BINTAN</string>
+    <string name="btn_enable_gps">AKTIFKAN GPS</string>
+    <string name="feeding_score_label">PELUANG IKAN MAKAN</string>
+    <string name="prime_hours_label">JAM GACOR PREDIKSI</string>
+    <string name="bait_recommendation_label">REKOMENDASI UMPAN &amp; TEKNIK</string>
+    <string name="bait_quick_guide_label">REFERENSI UMPAN CEPAT • BINTAN</string>
+    <string name="bait_quick_guide_shore_label">UMPAN &amp; TEKNIK MANCING PINGGIR • BINTAN</string>
+    <string name="bait_quick_guide_hint">Panduan dasar sesuai tren pasang surut saat ini. Tekan \"PINDAI KONDISI LAUT\" untuk analisis umpan spesifik dari Gemini AI.</string>
+    <string name="fishing_mode_section">MODE MANCING</string>
+    <string name="fishing_mode_shore_desc">Fokus pantai, dermaga, karang tepi &amp; umpan ringan.</string>
+    <string name="fishing_mode_boat_desc">Fokus perahu, karang dalam, slow jigging &amp; trolling.</string>
+    <string name="badge_gemini_ai">GEMINI AI</string>
+    <string name="ai_sample_notice">Mode Sampel Aktif — Fitur Gemini AI langsung memerlukan Firebase AI Logic.</string>
+
+    <!-- Waypoint Screen -->
+    <string name="waypoints_title">WAYPOINT GPS</string>
+    <string name="waypoints_subtitle">KOMPAS TARGET &amp; SPOT TERSIMPAN</string>
+    <string name="btn_save_current_spot">SIMPAN SPOT SAAT INI</string>
+    <string name="dialog_save_spot_title">Simpan Spot Mancing</string>
+    <string name="label_spot_name">Nama Spot (cth. Karang Berakit)</string>
+    <string name="label_spot_depth">Kedalaman</string>
+    <string name="label_spot_fish">Target Ikan (cth. Kerapu, Kakap)</string>
+    <string name="label_spot_notes">Catatan Struktur / Arus</string>
+    <string name="btn_save">SIMPAN</string>
+    <string name="btn_cancel">BATAL</string>
+    <string name="empty_waypoints_title">Belum Ada Spot Tersimpan</string>
+    <string name="empty_waypoints_desc">Tekan tombol di atas untuk menyimpan koordinat GPS saat ini beserta kedalaman karang sebagai waypoint kompas.</string>
+    <string name="compass_locked_label">TARGET TERKUNCI</string>
+    <string name="compass_no_target">Pilih spot di bawah untuk mengaktifkan kompas arah</string>
+
+    <!-- Sonar Camera Screen -->
+    <string name="camera_title">ANALISIS KAMERA SONAR</string>
+    <string name="camera_subtitle">POTRET LAYAR FISHFINDER ATAU KONDISI AIR</string>
+    <string name="btn_capture_photo">POTRET KAMERA</string>
+    <string name="btn_pick_gallery">PILIH GALERI</string>
+    <string name="btn_analyze_image">ANALISIS GAMBAR SONAR</string>
+    <string name="btn_analyzing_image">MENGANALISIS CITRA SONAR...</string>
+    <string name="camera_guide_caption">Potret permukaan air pantai/dermaga (untuk baca palung, batas karang &amp; jarak lempar) atau layar fishfinder portabel untuk analisis Gemini AI.</string>
+    <string name="camera_permission_denied">Izin kamera ditolak. Berikan izin kamera atau gunakan tombol Pilih Galeri.</string>
+
+    <!-- Settings Screen -->
+    <string name="settings_title">PENGATURAN</string>
+    <string name="settings_subtitle">KONFIGURASI API KEY &amp; INSTRUMEN LAUT</string>
+    <string name="settings_api_key_section">GEMINI API KEY (LOKAL)</string>
+    <string name="settings_api_key_hint">Masukkan Gemini API Key Anda</string>
+    <string name="btn_save_key">SIMPAN KEY</string>
+    <string name="btn_clear_key">HAPUS</string>
+    <string name="settings_key_saved">API Key tersimpan aman di SharedPreferences perangkat.</string>
+    <string name="settings_firebase_info">Firebase AI Logic aktif (gemini-3.8-flash + App Check). Analisis kondisi laut dan kamera sonar berjalan langsung dengan Gemini tanpa memerlukan API Key manual.</string>
+    <string name="settings_instruments_section">INSTRUMEN &amp; MODE MANCING</string>
+    <string name="settings_fishing_mode">Gaya Mancing Utama</string>
+    <string name="settings_depth_unit">Satuan Kedalaman</string>
+    <string name="settings_distance_unit">Satuan Jarak</string>
+    <string name="settings_radar_range">Jangkauan Radar Sonar</string>
+    <string name="settings_keep_screen_on">Layar Tetap Menyala di Laut</string>
+    <string name="settings_sensors_section">DIAGNOSTIK SENSOR PERANGKAT</string>
+</resources>
