@@ -67,7 +67,7 @@
 
     <!-- Settings Screen -->
     <string name="settings_title">PENGATURAN</string>
-    <string name="settings_subtitle">KONFIGURASI API KEY &amp; INSTRUMEN LAUT</string>
+    <string name="settings_subtitle">STATUS GEMINI AI, MODE MANCING &amp; INSTRUMEN</string>
     <string name="settings_api_key_section">GEMINI API KEY (LOKAL)</string>
     <string name="settings_api_key_hint">Masukkan Gemini API Key Anda</string>
     <string name="btn_save_key">SIMPAN KEY</string>

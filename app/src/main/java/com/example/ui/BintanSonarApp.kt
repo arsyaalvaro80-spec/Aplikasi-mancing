@@ -390,8 +390,6 @@ private fun SonarNavHost(
                 settings = settings,
                 gpsTelemetry = gpsTelemetry,
                 compassTelemetry = compassTelemetry,
-                onSaveApiKey = viewModel::saveApiKey,
-                onClearApiKey = viewModel::clearApiKey,
                 onSetDepthUnit = viewModel::setDepthUnit,
                 onSetDistanceUnit = viewModel::setDistanceUnit,
                 onSetSonarRangeMeters = viewModel::setSonarRangeMeters,

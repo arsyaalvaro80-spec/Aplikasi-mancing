@@ -15,38 +15,22 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.GpsFixed
-import androidx.compose.material.icons.rounded.Key
-import androidx.compose.material.icons.rounded.Save
-import androidx.compose.material.icons.rounded.Visibility
-import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.data.preferences.DepthUnit
@@ -56,7 +40,6 @@ import com.example.data.preferences.SonarSettings
 import com.example.sensors.CompassTelemetry
 import com.example.sensors.GpsTelemetry
 import com.example.sensors.MarineGeoUtils
-import com.example.ui.components.AiSampleNoticeBanner
 import com.example.ui.components.MarineScreenHeader
 import kotlin.math.roundToInt
 
@@ -65,8 +48,6 @@ fun SettingsScreen(
     settings: SonarSettings,
     gpsTelemetry: GpsTelemetry,
     compassTelemetry: CompassTelemetry,
-    onSaveApiKey: (String) -> Unit,
-    onClearApiKey: () -> Unit,
     onSetDepthUnit: (DepthUnit) -> Unit,
     onSetDistanceUnit: (DistanceUnit) -> Unit,
     onSetSonarRangeMeters: (Int) -> Unit,
@@ -74,14 +55,6 @@ fun SettingsScreen(
     onSetFishingMode: (FishingMode) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var apiKeyDraft by remember { mutableStateOf(settings.geminiApiKey) }
-    var showKeyText by remember { mutableStateOf(false) }
-    var savedBannerVisible by remember { mutableStateOf(false) }
-
-    LaunchedEffect(settings.geminiApiKey) {
-        apiKeyDraft = settings.geminiApiKey
-    }
-
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
@@ -96,137 +69,58 @@ fun SettingsScreen(
             )
         }
 
-        // Gemini API Key Local Storage Card
+        // Firebase AI Logic Status Card (no manual API key needed)
         item {
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surface,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
+                    .border(
+                        1.dp,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
+                        RoundedCornerShape(16.dp)
+                    )
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            imageVector = Icons.Rounded.Key,
-                            contentDescription = null,
+                            imageVector = Icons.Rounded.AutoAwesome,
+                            contentDescription = "Ikon Gemini AI aktif",
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = stringResource(R.string.settings_api_key_section),
+                            text = "GEMINI AI • FIREBASE AI LOGIC",
                             style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
 
-                    OutlinedTextField(
-                        value = apiKeyDraft,
-                        onValueChange = {
-                            apiKeyDraft = it
-                            savedBannerVisible = false
-                        },
-                        label = { Text(stringResource(R.string.settings_api_key_hint)) },
-                        singleLine = true,
-                        visualTransformation = if (showKeyText) {
-                            VisualTransformation.None
-                        } else {
-                            PasswordVisualTransformation()
-                        },
-                        trailingIcon = {
-                            IconButton(
-                                onClick = { showKeyText = !showKeyText },
-                                modifier = Modifier.size(48.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (showKeyText) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                                    contentDescription = if (showKeyText) "Sembunyikan API Key" else "Tampilkan API Key"
-                                )
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("api_key_input")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Rounded.CheckCircle,
+                            contentDescription = "Status aktif",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Terhubung langsung (tanpa perlu isi API Key manual)",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Text(
+                        text = stringResource(R.string.settings_firebase_info),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                onSaveApiKey(apiKeyDraft)
-                                savedBannerVisible = true
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                                .testTag("save_api_key_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Save,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = stringResource(R.string.btn_save_key),
-                                style = MaterialTheme.typography.labelLarge
-                            )
-                        }
-
-                        OutlinedButton(
-                            onClick = {
-                                apiKeyDraft = ""
-                                onClearApiKey()
-                                savedBannerVisible = false
-                            },
-                            enabled = settings.geminiApiKey.isNotBlank() || apiKeyDraft.isNotBlank(),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .height(48.dp)
-                                .testTag("clear_api_key_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.DeleteOutline,
-                                contentDescription = "Hapus API Key",
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = stringResource(R.string.btn_clear_key),
-                                style = MaterialTheme.typography.labelLarge
-                            )
-                        }
-                    }
-
-                    if (savedBannerVisible && settings.geminiApiKey.isNotBlank()) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Rounded.CheckCircle,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = stringResource(R.string.settings_key_saved),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-
-                    AiSampleNoticeBanner(notice = stringResource(R.string.settings_firebase_info))
                 }
             }
         }

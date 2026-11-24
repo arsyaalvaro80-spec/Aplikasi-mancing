@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
@@ -47,9 +48,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -84,13 +87,14 @@ fun SonarCameraScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var pendingPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    val listState = rememberLazyListState()
+    var pendingPhotoUriString by rememberSaveable { mutableStateOf<String?>(null) }
     var permissionError by remember { mutableStateOf<String?>(null) }
 
     val takePictureLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
-        val uri = pendingPhotoUri
+        val uri = pendingPhotoUriString?.let(Uri::parse)
         if (success && uri != null) {
             decodeScaledBitmap(context, uri)?.let { bmp ->
                 permissionError = null
@@ -105,7 +109,7 @@ fun SonarCameraScreen(
         if (granted) {
             permissionError = null
             val photoUri = createTempSonarPhotoUri(context)
-            pendingPhotoUri = photoUri
+            pendingPhotoUriString = photoUri.toString()
             takePictureLauncher.launch(photoUri)
         } else {
             permissionError = context.getString(R.string.camera_permission_denied)
@@ -124,9 +128,16 @@ fun SonarCameraScreen(
         }
     }
 
+    LaunchedEffect(visionState) {
+        if (visionState is SonarVisionUiState.Success) {
+            listState.animateScrollToItem(index = 4)
+        }
+    }
+
     val isAnalyzing = visionState is SonarVisionUiState.Loading
 
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -245,7 +256,7 @@ fun SonarCameraScreen(
                         ) == PackageManager.PERMISSION_GRANTED
                         if (hasCameraPerm) {
                             val photoUri = createTempSonarPhotoUri(context)
-                            pendingPhotoUri = photoUri
+                            pendingPhotoUriString = photoUri.toString()
                             takePictureLauncher.launch(photoUri)
                         } else {
                             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)

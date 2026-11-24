@@ -24,7 +24,8 @@ enum class ChartBaseLayer(
     val id: String,
     val maxZoom: Int
 ) {
-    MARINE_DARK("marine_dark_2x", 18),
+    // Shares keyless OpenStreetMap tiles rendered through a hue-preserving Marine Dark ColorMatrix
+    MARINE_DARK("osm_standard", 18),
     SATELLITE_REEF("satellite_reef", 17),
     OSM_STANDARD("osm_standard", 18)
 }
@@ -38,11 +39,15 @@ data class TileLoadStatus(
 
 /**
  * Two-tier (RAM LruCache + app-private disk cache in cacheDir) asynchronous slippy-tile loader.
- * Supports CartoDB Dark Matter @2x retina tiles, Esri World Imagery satellite reefs, OpenStreetMap,
- * and transparent OpenSeaMap nautical seamark overlays with zero API keys and zero storage permissions.
+ * Uses 100% keyless public tile servers: OpenStreetMap (light + Marine Dark filter),
+ * Esri World Imagery satellite reefs, and transparent OpenSeaMap nautical seamark overlays.
  */
 class MarineTileManager(context: Context) {
-    private val cacheRoot = File(context.applicationContext.cacheDir, "chart_tiles").apply { mkdirs() }
+    private val cacheRoot = File(context.applicationContext.cacheDir, "chart_tiles").apply {
+        mkdirs()
+        // Remove obsolete CartoDB tile cache that displayed API KEY watermarks
+        File(this, "marine_dark_2x").takeIf { it.exists() }?.deleteRecursively()
+    }
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -95,17 +100,13 @@ class MarineTileManager(context: Context) {
 
     private fun buildBaseTileUrl(layer: ChartBaseLayer, z: Int, x: Int, y: Int): String {
         return when (layer) {
-            ChartBaseLayer.MARINE_DARK -> {
-                val sub = listOf("a", "b", "c", "d")[((x + y) and 3)]
-                // High-DPI @2x retina tiles for razor-sharp island & coastline labels
-                "https://$sub.basemaps.cartocdn.com/dark_all/$z/$x/$y@2x.png"
+            ChartBaseLayer.MARINE_DARK,
+            ChartBaseLayer.OSM_STANDARD -> {
+                "https://tile.openstreetmap.org/$z/$x/$y.png"
             }
             ChartBaseLayer.SATELLITE_REEF -> {
                 // Esri World Imagery uses {z}/{y}/{x} order
                 "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/$z/$y/$x"
-            }
-            ChartBaseLayer.OSM_STANDARD -> {
-                "https://tile.openstreetmap.org/$z/$x/$y.png"
             }
         }
     }

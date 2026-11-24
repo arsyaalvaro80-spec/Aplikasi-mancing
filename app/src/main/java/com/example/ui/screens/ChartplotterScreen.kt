@@ -133,14 +133,15 @@ fun ChartplotterScreen(
     var zoom by remember { mutableDoubleStateOf(10.6) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
 
-    // Boost land/coastline/label readability on CartoDB Dark Matter under bright sunlight
+    // Hue-preserving Marine Dark Mode matrix (invert + 180° hue rotation) for keyless OSM tiles:
+    // renders oceans deep nautical navy-blue, land dark slate, forests deep green, and labels crisp white.
     val marineDarkFilter = remember {
         ColorFilter.colorMatrix(
             ColorMatrix(
                 floatArrayOf(
-                    1.38f, 0f, 0f, 0f, 10f,
-                    0f, 1.48f, 0f, 0f, 18f,
-                    0f, 0f, 1.65f, 0f, 30f,
+                    0.528f, -1.316f, -0.132f, 0f, 238f,
+                    -0.392f, -0.396f, -0.132f, 0f, 242f,
+                    -0.392f, -1.316f, 0.788f, 0f, 255f,
                     0f, 0f, 0f, 1f, 0f
                 )
             )
