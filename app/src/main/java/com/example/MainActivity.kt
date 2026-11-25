@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
         val appContext = applicationContext
         val database = SonarDatabase.getInstance(appContext)
         SonarViewModel.Factory(
+            appContext = appContext,
             waypointRepository = WaypointRepository(database.waypointDao()),
             preferences = SonarPreferences(appContext),
             aiRepository = FirebaseSonarAiRepository(),

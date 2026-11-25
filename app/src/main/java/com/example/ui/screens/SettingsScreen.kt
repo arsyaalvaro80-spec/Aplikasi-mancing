@@ -45,6 +45,7 @@ import com.example.data.preferences.SonarSettings
 import com.example.sensors.CompassTelemetry
 import com.example.sensors.GpsTelemetry
 import com.example.sensors.MarineGeoUtils
+import com.example.ui.components.MarineAlertsCard
 import com.example.ui.components.MarineScreenHeader
 import kotlin.math.roundToInt
 
@@ -60,6 +61,9 @@ fun SettingsScreen(
     onSetKeepScreenAwake: (Boolean) -> Unit,
     onSetFishingMode: (FishingMode) -> Unit,
     onSetAiModelPreference: (AiModelPreference) -> Unit,
+    onSetStormAlerts: (Boolean) -> Unit,
+    onSetTideAlerts: (Boolean) -> Unit,
+    onSendTestNotification: () -> Boolean,
     onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -184,6 +188,16 @@ fun SettingsScreen(
                     )
                 }
             }
+        }
+
+        // Storm & Rising-Tide ("Jam Gacor") Notification Settings Card
+        item {
+            MarineAlertsCard(
+                settings = settings,
+                onSetStormAlerts = onSetStormAlerts,
+                onSetTideAlerts = onSetTideAlerts,
+                onSendTestNotification = onSendTestNotification
+            )
         }
 
         // Fishfinder Instrument Preferences

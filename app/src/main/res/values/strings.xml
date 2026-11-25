@@ -13,14 +13,19 @@
     <string name="map_title">PETA CHARTPLOTTER</string>
     <string name="map_layer_dark">Laut Dark</string>
     <string name="map_layer_satellite">Satelit Karang</string>
+    <string name="map_layer_bathymetry">Batimetri</string>
     <string name="map_layer_osm">OSM</string>
+    <string name="map_overlay_reefs_spots">Karang &amp; Spot</string>
+    <string name="map_spot_atlas_button">Daftar Spot (16)</string>
     <string name="map_overlay_openseamap">OpenSeaMap</string>
     <string name="map_overlay_storm_radar">+ Radar Badai</string>
     <string name="map_casting_rings">Jarak Lempar</string>
-    <string name="map_shore_reef_legend">Terang = Karang/Pasir Dangkal  •  Biru Gelap = Palung (Target Lempar)</string>
+    <string name="map_shore_reef_legend">Terang = Karang/Pasir Dangkal  •  Biru Gelap = Palung  •  Pin Oranye = Spot Gacor</string>
     <string name="map_drop_pin_hint">Ketuk peta untuk menandai spot baru</string>
     <string name="map_follow_gps">Ikuti GPS</string>
     <string name="map_view_on_chart">Lihat di Peta</string>
+    <string name="map_save_offline">Simpan Offline</string>
+    <string name="map_offline_dialog_title">Simpan Peta Offline (1 Klik)</string>
 
     <!-- Weather & Storm Radar Screen -->
     <string name="weather_title">CUACA &amp; BADAI</string>

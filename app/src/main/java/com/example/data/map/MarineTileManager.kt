@@ -6,19 +6,29 @@ import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import com.example.sensors.WebMercator
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.util.Collections
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.cos
+import kotlin.math.floor
 
 enum class ChartBaseLayer(
     val id: String,
@@ -27,6 +37,7 @@ enum class ChartBaseLayer(
     // Shares keyless OpenStreetMap tiles rendered through a hue-preserving Marine Dark ColorMatrix
     MARINE_DARK("osm_standard", 18),
     SATELLITE_REEF("satellite_reef", 17),
+    OCEAN_BATHYMETRY("ocean_bathymetry", 13),
     OSM_STANDARD("osm_standard", 18)
 }
 
@@ -37,16 +48,30 @@ data class TileLoadStatus(
     val lastError: String? = null
 )
 
+data class OfflineMapState(
+    val isDownloading: Boolean = false,
+    val downloadedCount: Int = 0,
+    val totalCount: Int = 0,
+    val savedTileCount: Int = 0,
+    val savedSizeMb: Double = 0.0,
+    val statusMessage: String? = null
+)
+
 /**
- * Two-tier (RAM LruCache + app-private disk cache in cacheDir) asynchronous slippy-tile loader.
+ * Two-tier (RAM LruCache + persistent offline filesDir + app-private cacheDir) asynchronous slippy-tile loader.
  * Uses 100% keyless public tile servers: OpenStreetMap (light + Marine Dark filter),
- * Esri World Imagery satellite reefs, and transparent OpenSeaMap nautical seamark overlays.
+ * Esri World Imagery satellite reefs, OpenSeaMap seamarks, and RainViewer precipitation radar.
  */
 class MarineTileManager(context: Context) {
     private val cacheRoot = File(context.applicationContext.cacheDir, "chart_tiles").apply {
         mkdirs()
         // Remove obsolete CartoDB tile cache that displayed API KEY watermarks
         File(this, "marine_dark_2x").takeIf { it.exists() }?.deleteRecursively()
+    }
+
+    // Persistent offline region directory (never auto-purged by Android cache cleaner)
+    private val offlineRoot = File(context.applicationContext.filesDir, "offline_chart_tiles").apply {
+        mkdirs()
     }
 
     private val client = OkHttpClient.Builder()
@@ -56,6 +81,7 @@ class MarineTileManager(context: Context) {
         .build()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var offlineDownloadJob: Job? = null
 
     // Keep decoded tiles in memory for smooth 60fps panning
     private val memoryCache = object : LruCache<String, ImageBitmap>(140) {}
@@ -70,6 +96,197 @@ class MarineTileManager(context: Context) {
 
     private val _loadStatus = MutableStateFlow(TileLoadStatus())
     val loadStatus: StateFlow<TileLoadStatus> = _loadStatus.asStateFlow()
+
+    private val _offlineState = MutableStateFlow(OfflineMapState())
+    val offlineState: StateFlow<OfflineMapState> = _offlineState.asStateFlow()
+
+    init {
+        refreshOfflineStats()
+    }
+
+    fun refreshOfflineStats() {
+        scope.launch {
+            val (count, bytes) = computeOfflineUsage()
+            _offlineState.update {
+                it.copy(
+                    savedTileCount = count,
+                    savedSizeMb = bytes / (1024.0 * 1024.0)
+                )
+            }
+        }
+    }
+
+    fun downloadOfflineRegion(
+        layer: ChartBaseLayer,
+        centerLat: Double,
+        centerLon: Double
+    ) {
+        if (_offlineState.value.isDownloading) return
+
+        val tileCoords = buildOfflineTileList(layer, centerLat, centerLon)
+        if (tileCoords.isEmpty()) return
+
+        offlineDownloadJob = scope.launch {
+            val completed = AtomicInteger(0)
+            val failed = AtomicInteger(0)
+            _offlineState.update {
+                it.copy(
+                    isDownloading = true,
+                    downloadedCount = 0,
+                    totalCount = tileCoords.size,
+                    statusMessage = "Menyiapkan ${tileCoords.size} ubin peta offline..."
+                )
+            }
+
+            try {
+                val chunks = tileCoords.chunked(4)
+                for (batch in chunks) {
+                    if (!isActive) break
+                    coroutineScope {
+                        batch.map { (z, x, y) ->
+                            async {
+                                val targetFile = File(
+                                    File(offlineRoot, "${layer.id}/$z/$x").apply { mkdirs() },
+                                    "$y.tile"
+                                )
+                                val ok = if (targetFile.exists() && targetFile.length() > 0L) {
+                                    true
+                                } else {
+                                    downloadSingleTileToFile(
+                                        url = buildBaseTileUrl(layer, z, x, y),
+                                        targetFile = targetFile
+                                    )
+                                }
+                                if (!ok) failed.incrementAndGet()
+                                val done = completed.incrementAndGet()
+                                _offlineState.update {
+                                    it.copy(
+                                        downloadedCount = done,
+                                        statusMessage = "Mengunduh $done / ${tileCoords.size} ubin..."
+                                    )
+                                }
+                            }
+                        }.awaitAll()
+                    }
+                }
+
+                val (count, bytes) = computeOfflineUsage()
+                val failCount = failed.get()
+                val finalMsg = when {
+                    !isActive -> "Unduhan peta offline dibatalkan."
+                    failCount == 0 -> "Peta offline tersimpan! Siap dipakai tanpa sinyal."
+                    failCount < tileCoords.size -> "Tersimpan (${tileCoords.size - failCount}/${tileCoords.size} ubin berhasil)."
+                    else -> "Gagal mengunduh peta offline. Periksa koneksi internet."
+                }
+                failedTiles.clear()
+                _tileVersion.update { it + 1L }
+                _offlineState.update {
+                    it.copy(
+                        isDownloading = false,
+                        savedTileCount = count,
+                        savedSizeMb = bytes / (1024.0 * 1024.0),
+                        statusMessage = finalMsg
+                    )
+                }
+            } catch (e: CancellationException) {
+                val (count, bytes) = computeOfflineUsage()
+                _offlineState.update {
+                    it.copy(
+                        isDownloading = false,
+                        savedTileCount = count,
+                        savedSizeMb = bytes / (1024.0 * 1024.0),
+                        statusMessage = "Unduhan peta offline dibatalkan."
+                    )
+                }
+                throw e
+            }
+        }
+    }
+
+    fun cancelOfflineDownload() {
+        offlineDownloadJob?.cancel()
+        offlineDownloadJob = null
+    }
+
+    fun clearOfflineTiles() {
+        cancelOfflineDownload()
+        scope.launch {
+            runCatching {
+                offlineRoot.listFiles()?.forEach { it.deleteRecursively() }
+            }
+            _offlineState.value = OfflineMapState(
+                savedTileCount = 0,
+                savedSizeMb = 0.0,
+                statusMessage = "Peta offline dihapus."
+            )
+        }
+    }
+
+    private fun buildOfflineTileList(
+        layer: ChartBaseLayer,
+        centerLat: Double,
+        centerLon: Double
+    ): List<Triple<Int, Int, Int>> {
+        val result = mutableListOf<Triple<Int, Int, Int>>()
+        val maxZ = minOf(layer.maxZoom, 16)
+        // Zoom 11-15 cover ~4.5 km radius around spot; Zoom 16 covers ~1.4 km ultra-detail shoreline
+        for (z in 11..maxZ) {
+            val radiusKm = if (z >= 16) 1.4 else 4.5
+            val dLat = radiusKm / 111.32
+            val cosLat = cos(Math.toRadians(centerLat)).coerceAtLeast(0.2)
+            val dLon = radiusKm / (111.32 * cosLat)
+
+            val numTiles = 1 shl z
+            val x1 = floor(WebMercator.lonToWorldX(centerLon - dLon) * numTiles).toInt()
+            val x2 = floor(WebMercator.lonToWorldX(centerLon + dLon) * numTiles).toInt()
+            val y1 = floor(WebMercator.latToWorldY(centerLat + dLat) * numTiles).toInt().coerceIn(0, numTiles - 1)
+            val y2 = floor(WebMercator.latToWorldY(centerLat - dLat) * numTiles).toInt().coerceIn(0, numTiles - 1)
+
+            val minX = minOf(x1, x2)
+            val maxX = maxOf(x1, x2)
+            val minY = minOf(y1, y2)
+            val maxY = maxOf(y1, y2)
+
+            for (txRaw in minX..maxX) {
+                val tx = ((txRaw % numTiles) + numTiles) % numTiles
+                for (ty in minY..maxY) {
+                    result.add(Triple(z, tx, ty))
+                }
+            }
+        }
+        return result.take(180)
+    }
+
+    private fun downloadSingleTileToFile(url: String, targetFile: File): Boolean {
+        return try {
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", USER_AGENT)
+                .header("Accept", "image/png,image/jpeg,image/*")
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return false
+                val bytes = response.body?.bytes() ?: return false
+                if (bytes.isEmpty()) return false
+                targetFile.writeBytes(bytes)
+                true
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun computeOfflineUsage(): Pair<Int, Long> {
+        var count = 0
+        var bytes = 0L
+        offlineRoot.walkTopDown().forEach { file ->
+            if (file.isFile && file.name.endsWith(".tile")) {
+                count++
+                bytes += file.length()
+            }
+        }
+        return count to bytes
+    }
 
     fun retryFailedTiles() {
         failedTiles.clear()
@@ -137,8 +354,12 @@ class MarineTileManager(context: Context) {
                 "https://tile.openstreetmap.org/$z/$x/$y.png"
             }
             ChartBaseLayer.SATELLITE_REEF -> {
-                // Esri World Imagery uses {z}/{y}/{x} order
+                // Esri World Imagery uses {z}/{y}/{x} order — shows shallow coral reefs clearly
                 "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/$z/$y/$x"
+            }
+            ChartBaseLayer.OCEAN_BATHYMETRY -> {
+                // Esri World Ocean Base (keyless public bathymetry & underwater depth contour map)
+                "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/$z/$y/$x"
             }
         }
     }
@@ -158,15 +379,25 @@ class MarineTileManager(context: Context) {
 
         scope.launch {
             try {
+                val persistentOfflineFile = if (persistToDisk) {
+                    File(offlineRoot, "$layerId/$z/$x/$y.tile")
+                } else {
+                    null
+                }
                 val diskFile = if (persistToDisk) {
                     File(File(cacheRoot, "$layerId/$z/$x").apply { mkdirs() }, "$y.tile")
                 } else {
                     null
                 }
 
-                // 1. Check local disk cache first (supports offline use at sea)
-                if (diskFile != null && diskFile.exists() && diskFile.length() > 0L) {
-                    val bitmap = BitmapFactory.decodeFile(diskFile.absolutePath)
+                // 1. Check persistent offline pack first, then rolling disk cache (supports 100% offline use at sea)
+                val cachedSource = when {
+                    persistentOfflineFile != null && persistentOfflineFile.exists() && persistentOfflineFile.length() > 0L -> persistentOfflineFile
+                    diskFile != null && diskFile.exists() && diskFile.length() > 0L -> diskFile
+                    else -> null
+                }
+                if (cachedSource != null) {
+                    val bitmap = BitmapFactory.decodeFile(cachedSource.absolutePath)
                     if (bitmap != null) {
                         memoryCache.put(key, bitmap.asImageBitmap())
                         if (!isOverlay) {
@@ -175,7 +406,7 @@ class MarineTileManager(context: Context) {
                         _tileVersion.update { it + 1L }
                         return@launch
                     } else {
-                        diskFile.delete()
+                        cachedSource.delete()
                     }
                 }
 

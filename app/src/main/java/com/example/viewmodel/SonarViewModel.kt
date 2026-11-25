@@ -1,5 +1,6 @@
 package com.example.viewmodel
 
+import android.content.Context
 import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -18,6 +19,7 @@ import com.example.data.preferences.SonarSettings
 import com.example.data.map.MarineTileManager
 import com.example.data.marine.TideForecastData
 import com.example.data.marine.TideMarineRepository
+import com.example.data.notifications.MarineAlertManager
 import com.example.data.weather.WeatherDashboardData
 import com.example.data.weather.WeatherRadarRepository
 import com.example.sensors.CompassSensorManager
@@ -68,6 +70,7 @@ data class StormMapFocusRequest(
 )
 
 class SonarViewModel(
+    private val appContext: Context,
     private val waypointRepository: WaypointRepository,
     private val preferences: SonarPreferences,
     private val aiRepository: SonarAiRepository,
@@ -123,12 +126,22 @@ class SonarViewModel(
     val stormMapRequest: StateFlow<StormMapFocusRequest?> = _stormMapRequest.asStateFlow()
 
     init {
+        MarineAlertManager.ensureChannels(appContext)
+        val currentSettings = preferences.settings.value
+        if (currentSettings.stormAlertsEnabled || currentSettings.tideAlertsEnabled) {
+            MarineAlertManager.syncPeriodicMonitoring(
+                context = appContext,
+                stormEnabled = currentSettings.stormAlertsEnabled,
+                tideEnabled = currentSettings.tideAlertsEnabled
+            )
+        }
         refreshTideForecast()
         refreshWeatherDashboard()
         // Record live GPS breadcrumb track when vessel moves more than 5 meters
         viewModelScope.launch {
             gpsTelemetry.collect { gps ->
                 if (!gps.isLiveFix) return@collect
+                preferences.saveLastKnownLocation(gps.latitude, gps.longitude)
                 val current = _vesselTrack.value
                 val last = current.lastOrNull()
                 val shouldAppend = last == null || MarineGeoUtils.distanceMeters(
@@ -375,12 +388,50 @@ class SonarViewModel(
     fun setFishingMode(mode: FishingMode) = preferences.setFishingMode(mode)
     fun setAiModelPreference(preference: AiModelPreference) = preferences.setAiModelPreference(preference)
 
+    fun setStormAlertsEnabled(enabled: Boolean) {
+        preferences.setStormAlertsEnabled(enabled)
+        val s = settings.value
+        MarineAlertManager.syncPeriodicMonitoring(
+            context = appContext,
+            stormEnabled = enabled,
+            tideEnabled = s.tideAlertsEnabled
+        )
+    }
+
+    fun setTideAlertsEnabled(enabled: Boolean) {
+        preferences.setTideAlertsEnabled(enabled)
+        val s = settings.value
+        MarineAlertManager.syncPeriodicMonitoring(
+            context = appContext,
+            stormEnabled = s.stormAlertsEnabled,
+            tideEnabled = enabled
+        )
+    }
+
+    fun sendTestMarineNotification(): Boolean {
+        val s = settings.value
+        val tideSummary = (tideState.value as? TideUiState.Ready)?.data?.let {
+            "${it.currentTrend.label} (${String.format(java.util.Locale.US, "%+.2f", it.currentHeightMeters)}m)"
+        }
+        val weatherSummary = (weatherState.value as? WeatherUiState.Ready)?.data?.let {
+            "${it.current.conditionLabel}, angin ${String.format(java.util.Locale.US, "%.0f", it.current.windGustsKnots)} kn"
+        }
+        return MarineAlertManager.sendTestNotification(
+            context = appContext,
+            stormEnabled = s.stormAlertsEnabled,
+            tideEnabled = s.tideAlertsEnabled,
+            tideSummary = tideSummary,
+            weatherSummary = weatherSummary
+        )
+    }
+
     override fun onCleared() {
         super.onCleared()
         stopSensors()
     }
 
     class Factory(
+        private val appContext: Context,
         private val waypointRepository: WaypointRepository,
         private val preferences: SonarPreferences,
         private val aiRepository: SonarAiRepository,
@@ -394,6 +445,7 @@ class SonarViewModel(
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             require(modelClass.isAssignableFrom(SonarViewModel::class.java))
             return SonarViewModel(
+                appContext = appContext,
                 waypointRepository = waypointRepository,
                 preferences = preferences,
                 aiRepository = aiRepository,

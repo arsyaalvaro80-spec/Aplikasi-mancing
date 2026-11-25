@@ -51,11 +51,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.data.preferences.SonarSettings
 import com.example.data.weather.DailyWeatherItem
 import com.example.data.weather.HourlyWeatherItem
 import com.example.data.weather.RegionalStormZone
 import com.example.data.weather.WeatherDashboardData
 import com.example.data.weather.WeatherSeverity
+import com.example.ui.components.MarineAlertsCard
 import com.example.ui.components.MarineScreenHeader
 import com.example.viewmodel.WeatherUiState
 import java.util.Locale
@@ -64,8 +66,12 @@ import kotlin.math.roundToInt
 @Composable
 fun WeatherScreen(
     weatherState: WeatherUiState,
+    settings: SonarSettings,
     onRefreshWeather: () -> Unit,
     onOpenStormMap: (lat: Double?, lon: Double?) -> Unit,
+    onSetStormAlerts: (Boolean) -> Unit,
+    onSetTideAlerts: (Boolean) -> Unit,
+    onSendTestNotification: () -> Boolean,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -168,6 +174,14 @@ fun WeatherScreen(
                         }
                     }
                 }
+                item {
+                    MarineAlertsCard(
+                        settings = settings,
+                        onSetStormAlerts = onSetStormAlerts,
+                        onSetTideAlerts = onSetTideAlerts,
+                        onSendTestNotification = onSendTestNotification
+                    )
+                }
             }
 
             is WeatherUiState.Ready -> {
@@ -192,14 +206,24 @@ fun WeatherScreen(
                     }
                 }
 
-                // 3. Next 24 Hours Hourly Forecast
+                // 3. Automatic Storm & Rising-Tide ("Jam Gacor") Notifications Card
+                item {
+                    MarineAlertsCard(
+                        settings = settings,
+                        onSetStormAlerts = onSetStormAlerts,
+                        onSetTideAlerts = onSetTideAlerts,
+                        onSendTestNotification = onSendTestNotification
+                    )
+                }
+
+                // 4. Next 24 Hours Hourly Forecast
                 if (data.hourlyNext24h.isNotEmpty()) {
                     item {
                         HourlyWeatherStripCard(hourly = data.hourlyNext24h)
                     }
                 }
 
-                // 4. Next 7 Days Daily Forecast
+                // 5. Next 7 Days Daily Forecast
                 if (data.dailyNext7Days.isNotEmpty()) {
                     item {
                         DailySevenDayCard(daily = data.dailyNext7Days)

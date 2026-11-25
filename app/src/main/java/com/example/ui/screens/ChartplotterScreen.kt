@@ -33,20 +33,26 @@ import androidx.compose.material.icons.rounded.CenterFocusStrong
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.GpsFixed
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.MyLocation
+import androidx.compose.material.icons.rounded.OfflinePin
+import androidx.compose.material.icons.rounded.Phishing
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Sailing
 import androidx.compose.material.icons.rounded.Thunderstorm
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -86,8 +92,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.data.local.WaypointEntity
+import com.example.data.map.BintanHotspot
+import com.example.data.map.BintanReefAtlas
 import com.example.data.map.ChartBaseLayer
 import com.example.data.map.MarineTileManager
+import com.example.data.map.OfflineMapState
+import com.example.data.map.SpotAccessType
 import com.example.data.preferences.DepthUnit
 import com.example.data.preferences.FishingMode
 import com.example.data.preferences.SonarSettings
@@ -97,6 +107,9 @@ import com.example.sensors.GpsTelemetry
 import com.example.sensors.LatLon
 import com.example.sensors.MarineGeoUtils
 import com.example.sensors.WebMercator
+import com.example.ui.components.BintanSpotAtlasDialog
+import com.example.ui.components.SelectedHotspotDetailCard
+import com.example.ui.components.reefColorFor
 import com.example.viewmodel.StormMapFocusRequest
 import com.example.viewmodel.WeatherUiState
 import java.util.Locale
@@ -128,6 +141,7 @@ fun ChartplotterScreen(
 ) {
     val tileVersion by tileManager.tileVersion.collectAsStateWithLifecycle()
     val loadStatus by tileManager.loadStatus.collectAsStateWithLifecycle()
+    val offlineState by tileManager.offlineState.collectAsStateWithLifecycle()
     val density = LocalDensity.current
     // Keep tile rendering crisp (~384-480px) so Pulau Bintan coastline & labels remain sharp
     val baseTilePx = remember(density) { 256.0 * density.density.coerceIn(1.35f, 1.85f) }
@@ -141,6 +155,10 @@ fun ChartplotterScreen(
     var showOpenSeaMap by remember { mutableStateOf(!isShoreMode) }
     var showCastingRings by remember { mutableStateOf(isShoreMode) }
     var showStormRadar by remember { mutableStateOf(false) }
+    var showReefHotspots by remember { mutableStateOf(true) }
+    var selectedHotspot by remember { mutableStateOf<BintanHotspot?>(null) }
+    var showSpotAtlasDialog by remember { mutableStateOf(false) }
+    var showOfflineDialog by remember { mutableStateOf(false) }
     var selectedRadarFrameIdx by remember { mutableStateOf(-1) }
     var followVessel by remember { mutableStateOf(true) }
     var dropPinMode by remember { mutableStateOf(false) }
@@ -268,6 +286,24 @@ fun ChartplotterScreen(
             setShadowLayer(6f, 0f, 2f, android.graphics.Color.BLACK)
         }
     }
+    val hotspotLabelPaint = remember {
+        Paint().apply {
+            isAntiAlias = true
+            color = android.graphics.Color.parseColor("#FFE8B6")
+            textSize = 30f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            setShadowLayer(7f, 0f, 2f, android.graphics.Color.BLACK)
+        }
+    }
+    val reefZoneLabelPaint = remember {
+        Paint().apply {
+            isAntiAlias = true
+            color = android.graphics.Color.parseColor("#FF9E80")
+            textSize = 27f
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            setShadowLayer(6f, 0f, 2f, android.graphics.Color.BLACK)
+        }
+    }
 
     Box(
         modifier = modifier
@@ -300,7 +336,7 @@ fun ChartplotterScreen(
                         }
                     }
                 }
-                .pointerInput(waypoints, dropPinMode, baseTilePx) {
+                .pointerInput(waypoints, dropPinMode, showReefHotspots, baseTilePx) {
                     detectTapGestures { tapOffset ->
                         val w = size.width.toDouble()
                         val h = size.height.toDouble()
@@ -342,7 +378,42 @@ fun ChartplotterScreen(
                                 closest = wp
                             }
                         }
-                        closest?.let { onSelectWaypoint(it.id) }
+                        if (closest != null) {
+                            selectedHotspot = null
+                            onSelectWaypoint(closest!!.id)
+                            return@detectTapGestures
+                        }
+
+                        // Hit-test curated Pulau Bintan fishing hotspots within 44dp radius
+                        if (showReefHotspots) {
+                            var closestSpot: BintanHotspot? = null
+                            var bestSpotDist = Float.MAX_VALUE
+                            BintanReefAtlas.hotspots.forEach { spot ->
+                                val (hx, hy) = WebMercator.latLonToScreen(
+                                    targetLat = spot.latitude,
+                                    targetLon = spot.longitude,
+                                    centerLat = centerLat,
+                                    centerLon = centerLon,
+                                    zoom = zoom,
+                                    baseTilePx = baseTilePx,
+                                    viewportWidth = w,
+                                    viewportHeight = h
+                                )
+                                val d = hypot(tapOffset.x - hx, tapOffset.y - hy)
+                                if (d <= hitRadiusPx && d < bestSpotDist) {
+                                    bestSpotDist = d
+                                    closestSpot = spot
+                                }
+                            }
+                            if (closestSpot != null) {
+                                selectedHotspot = closestSpot
+                                followVessel = false
+                                return@detectTapGestures
+                            }
+                        }
+
+                        // Tapping open water dismisses hotspot card
+                        selectedHotspot = null
                     }
                 }
                 .testTag("chartplotter_map_canvas")
@@ -531,6 +602,130 @@ fun ChartplotterScreen(
                             zy - 8.dp.toPx(),
                             labelTextPaint
                         )
+                    }
+                }
+            }
+
+            // 2c. Pulau Bintan Coral Reef & Drop-Off Zones + Popular Fishing Hotspots
+            if (showReefHotspots) {
+                val mpp = WebMercator.metersPerPixel(centerLat, zoom, baseTilePx)
+
+                // Draw coral reef & rocky drop-off zone footprints
+                BintanReefAtlas.reefZones.forEach { zone ->
+                    val (rx, ry) = WebMercator.latLonToScreen(
+                        targetLat = zone.centerLat,
+                        targetLon = zone.centerLon,
+                        centerLat = centerLat,
+                        centerLon = centerLon,
+                        zoom = zoom,
+                        baseTilePx = baseTilePx,
+                        viewportWidth = widthD,
+                        viewportHeight = heightD
+                    )
+                    val radiusPx = (zone.radiusMeters / mpp).toFloat().coerceIn(14.dp.toPx(), 420.dp.toPx())
+                    if (rx in (-radiusPx - 40f)..(size.width + radiusPx + 40f) &&
+                        ry in (-radiusPx - 40f)..(size.height + radiusPx + 40f)
+                    ) {
+                        val zoneColor = reefColorFor(zone.bottomType)
+                        val zoneCenter = Offset(rx, ry)
+                        drawCircle(
+                            color = zoneColor.copy(alpha = 0.14f),
+                            radius = radiusPx,
+                            center = zoneCenter
+                        )
+                        drawCircle(
+                            color = zoneColor.copy(alpha = 0.72f),
+                            radius = radiusPx,
+                            center = zoneCenter,
+                            style = Stroke(
+                                width = 1.8.dp.toPx(),
+                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f))
+                            )
+                        )
+                        if (radiusPx >= 28.dp.toPx()) {
+                            drawCircle(
+                                color = zoneColor.copy(alpha = 0.35f),
+                                radius = radiusPx * 0.62f,
+                                center = zoneCenter,
+                                style = Stroke(width = 1.1.dp.toPx())
+                            )
+                        }
+                        if (zoom >= 10.6) {
+                            drawContext.canvas.nativeCanvas.drawText(
+                                "${zone.name} (${zone.depthRangeLabel})",
+                                rx - radiusPx * 0.45f,
+                                ry - radiusPx - 6.dp.toPx(),
+                                reefZoneLabelPaint
+                            )
+                        }
+                    }
+                }
+
+                // Draw popular Pulau Bintan Spot Gacor markers
+                BintanReefAtlas.hotspots.forEach { spot ->
+                    val (hx, hy) = WebMercator.latLonToScreen(
+                        targetLat = spot.latitude,
+                        targetLon = spot.longitude,
+                        centerLat = centerLat,
+                        centerLon = centerLon,
+                        zoom = zoom,
+                        baseTilePx = baseTilePx,
+                        viewportWidth = widthD,
+                        viewportHeight = heightD
+                    )
+                    if (hx in -80f..(size.width + 80f) && hy in -80f..(size.height + 80f)) {
+                        val isSpotSelected = selectedHotspot?.id == spot.id
+                        val spotColor = reefColorFor(spot.bottomType)
+                        val spotCenter = Offset(hx, hy)
+
+                        if (isSpotSelected) {
+                            drawCircle(
+                                color = spotColor.copy(alpha = 0.30f),
+                                radius = 24.dp.toPx(),
+                                center = spotCenter
+                            )
+                            drawCircle(
+                                color = spotColor,
+                                radius = 16.dp.toPx(),
+                                center = spotCenter,
+                                style = Stroke(width = 2.2.dp.toPx())
+                            )
+                        } else {
+                            drawCircle(
+                                color = spotColor.copy(alpha = 0.22f),
+                                radius = 13.dp.toPx(),
+                                center = spotCenter
+                            )
+                        }
+
+                        val markerRadius = if (isSpotSelected) 9.5.dp.toPx() else if (spot.accessType == SpotAccessType.SHORE) 8.dp.toPx() else 7.dp.toPx()
+                        drawCircle(
+                            color = spotColor,
+                            radius = markerRadius,
+                            center = spotCenter
+                        )
+                        drawCircle(
+                            color = backgroundColor,
+                            radius = markerRadius,
+                            center = spotCenter,
+                            style = Stroke(width = 2.dp.toPx())
+                        )
+                        drawCircle(
+                            color = Color.White,
+                            radius = if (spot.accessType == SpotAccessType.SHORE) 3.dp.toPx() else 2.4.dp.toPx(),
+                            center = spotCenter
+                        )
+
+                        if (isSpotSelected || zoom >= 10.4) {
+                            val shortTitle = spot.name.substringBefore(" (")
+                            val displayTitle = if (isSpotSelected) "★ $shortTitle (${spot.depthRange})" else shortTitle
+                            drawContext.canvas.nativeCanvas.drawText(
+                                displayTitle,
+                                hx + 11.dp.toPx(),
+                                hy + 5.dp.toPx(),
+                                hotspotLabelPaint
+                            )
+                        }
                     }
                 }
             }
@@ -754,7 +949,7 @@ fun ChartplotterScreen(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Compact Layer Selector Row (Laut Dark / Satelit Karang / OSM + OpenSeaMap)
+            // Compact Layer Selector Row (Satelit Karang / Batimetri / Karang & Spot / Daftar Spot / Laut Dark / OSM)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -763,12 +958,6 @@ fun ChartplotterScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 LayerChip(
-                    label = stringResource(R.string.map_layer_dark),
-                    selected = activeLayer == ChartBaseLayer.MARINE_DARK,
-                    onClick = { activeLayer = ChartBaseLayer.MARINE_DARK },
-                    testTag = "map_layer_dark_chip"
-                )
-                LayerChip(
                     label = stringResource(R.string.map_layer_satellite),
                     selected = activeLayer == ChartBaseLayer.SATELLITE_REEF,
                     onClick = {
@@ -776,6 +965,45 @@ fun ChartplotterScreen(
                         zoom = zoom.coerceAtMost(ChartBaseLayer.SATELLITE_REEF.maxZoom.toDouble())
                     },
                     testTag = "map_layer_satellite_chip"
+                )
+                FilterChip(
+                    selected = showReefHotspots,
+                    onClick = { showReefHotspots = !showReefHotspots },
+                    label = {
+                        Text(
+                            text = stringResource(R.string.map_overlay_reefs_spots),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Rounded.Phishing,
+                            contentDescription = "Tampilkan zona karang dan spot gacor Bintan",
+                            modifier = Modifier.size(15.dp)
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = surfaceColor.copy(alpha = 0.90f),
+                        selectedContainerColor = Color(0xFFFF6B4A).copy(alpha = 0.25f),
+                        selectedLabelColor = Color(0xFFFFB020),
+                        selectedLeadingIconColor = Color(0xFFFF6B4A)
+                    ),
+                    modifier = Modifier.testTag("map_reefs_spots_toggle")
+                )
+                LayerChip(
+                    label = stringResource(R.string.map_layer_bathymetry),
+                    selected = activeLayer == ChartBaseLayer.OCEAN_BATHYMETRY,
+                    onClick = {
+                        activeLayer = ChartBaseLayer.OCEAN_BATHYMETRY
+                        zoom = zoom.coerceAtMost(ChartBaseLayer.OCEAN_BATHYMETRY.maxZoom.toDouble())
+                    },
+                    testTag = "map_layer_bathymetry_chip"
+                )
+                LayerChip(
+                    label = stringResource(R.string.map_layer_dark),
+                    selected = activeLayer == ChartBaseLayer.MARINE_DARK,
+                    onClick = { activeLayer = ChartBaseLayer.MARINE_DARK },
+                    testTag = "map_layer_dark_chip"
                 )
                 LayerChip(
                     label = stringResource(R.string.map_layer_osm),
@@ -870,6 +1098,106 @@ fun ChartplotterScreen(
                     ),
                     modifier = Modifier.testTag("map_openseamap_toggle")
                 )
+                FilterChip(
+                    selected = offlineState.savedTileCount > 0 || offlineState.isDownloading,
+                    onClick = { showOfflineDialog = true },
+                    label = {
+                        Text(
+                            text = when {
+                                offlineState.isDownloading && offlineState.totalCount > 0 ->
+                                    "Unduh ${offlineState.downloadedCount}/${offlineState.totalCount}"
+                                offlineState.savedTileCount > 0 ->
+                                    "Offline (${offlineState.savedTileCount})"
+                                else -> stringResource(R.string.map_save_offline)
+                            },
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = if (offlineState.savedTileCount > 0 && !offlineState.isDownloading) {
+                                Icons.Rounded.OfflinePin
+                            } else {
+                                Icons.Rounded.CloudDownload
+                            },
+                            contentDescription = "Simpan peta offline",
+                            modifier = Modifier.size(15.dp)
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = surfaceColor.copy(alpha = 0.90f),
+                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f),
+                        selectedLabelColor = primaryColor,
+                        selectedLeadingIconColor = primaryColor
+                    ),
+                    modifier = Modifier.testTag("map_save_offline_chip")
+                )
+            }
+
+            // Live Offline Map Download Progress Bar Banner
+            if (offlineState.isDownloading) {
+                val progress = if (offlineState.totalCount > 0) {
+                    (offlineState.downloadedCount.toFloat() / offlineState.totalCount.toFloat()).coerceIn(0f, 1f)
+                } else {
+                    0f
+                }
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = surfaceColor.copy(alpha = 0.94f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, primaryColor.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.CloudDownload,
+                                    contentDescription = null,
+                                    tint = primaryColor,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = offlineState.statusMessage ?: "Mengunduh peta offline...",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = textPrimaryColor
+                                )
+                            }
+                            IconButton(
+                                onClick = { tileManager.cancelOfflineDownload() },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("cancel_offline_download_banner_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Close,
+                                    contentDescription = "Batalkan unduhan peta offline",
+                                    tint = errorColor,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        LinearProgressIndicator(
+                            progress = { progress },
+                            color = primaryColor,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                        )
+                    }
+                }
             }
 
             // Live Storm Radar Legend & Time-Frame Bar
@@ -1182,6 +1510,13 @@ fun ChartplotterScreen(
                 testTag = "map_center_gps_button"
             )
             ChartControlButton(
+                icon = Icons.Rounded.Phishing,
+                contentDescription = stringResource(R.string.map_spot_atlas_button),
+                active = showSpotAtlasDialog,
+                onClick = { showSpotAtlasDialog = true },
+                testTag = "map_spot_atlas_button"
+            )
+            ChartControlButton(
                 icon = Icons.Rounded.AddLocationAlt,
                 contentDescription = "Tandai spot baru di peta",
                 active = dropPinMode,
@@ -1239,110 +1574,135 @@ fun ChartplotterScreen(
             )
         }
 
-        // BOTTOM FLOATING ROUTE & TARGET HUD CARD
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = surfaceColor.copy(alpha = 0.94f),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 12.dp)
-                .border(
-                    width = 1.dp,
-                    color = if (selectedWaypoint != null) primaryColor.copy(alpha = 0.65f) else gridColor,
-                    shape = RoundedCornerShape(16.dp)
-                )
-        ) {
-            if (selectedWaypoint != null && targetDistanceMeters != null && targetBearing != null) {
-                val isOnCourse = signedTurn != null && abs(signedTurn) <= 12f
-                val steerText = when {
-                    signedTurn == null -> "RUTE AKTIF"
-                    isOnCourse -> "HALUAN TEPAT"
-                    signedTurn > 0f -> "KANAN ${signedTurn.roundToInt()}°"
-                    else -> "KIRI ${abs(signedTurn).roundToInt()}°"
-                }
+        // BOTTOM FLOATING HUD: Curated Spot Gacor Detail Card OR Active Route & Target Card
+        val activeHotspot = selectedHotspot
+        if (activeHotspot != null) {
+            SelectedHotspotDetailCard(
+                spot = activeHotspot,
+                userLat = gpsTelemetry.latitude,
+                userLon = gpsTelemetry.longitude,
+                distanceUnit = settings.distanceUnit,
+                onSaveAndLockRoute = { spot ->
+                    onSaveWaypointAt(
+                        spot.name,
+                        spot.latitude,
+                        spot.longitude,
+                        spot.depthMetersEstimate,
+                        spot.targetFish,
+                        "${spot.bottomType.label} (${spot.depthRange}) • Umpan: ${spot.bestBait} • ${spot.castTip}"
+                    )
+                    selectedHotspot = null
+                },
+                onDismiss = { selectedHotspot = null },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 12.dp, vertical = 12.dp)
+            )
+        } else {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = surfaceColor.copy(alpha = 0.94f),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 12.dp)
+                    .border(
+                        width = 1.dp,
+                        color = if (selectedWaypoint != null) primaryColor.copy(alpha = 0.65f) else gridColor,
+                        shape = RoundedCornerShape(16.dp)
+                    )
+            ) {
+                if (selectedWaypoint != null && targetDistanceMeters != null && targetBearing != null) {
+                    val isOnCourse = signedTurn != null && abs(signedTurn) <= 12f
+                    val steerText = when {
+                        signedTurn == null -> "RUTE AKTIF"
+                        isOnCourse -> "HALUAN TEPAT"
+                        signedTurn > 0f -> "KANAN ${signedTurn.roundToInt()}°"
+                        else -> "KIRI ${abs(signedTurn).roundToInt()}°"
+                    }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Rounded.Sailing,
-                                contentDescription = null,
-                                tint = primaryColor,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Sailing,
+                                    contentDescription = null,
+                                    tint = primaryColor,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = selectedWaypoint.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = textPrimaryColor
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = selectedWaypoint.name,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = textPrimaryColor
+                                text = "Kedalaman ${MarineGeoUtils.formatDepth(selectedWaypoint.depthMeters, settings.depthUnit)} • " +
+                                    "BRG ${targetBearing.roundToInt()}° ${MarineGeoUtils.cardinalDirection(targetBearing)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = secondaryColor
                             )
                         }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Kedalaman ${MarineGeoUtils.formatDepth(selectedWaypoint.depthMeters, settings.depthUnit)} • " +
-                                "BRG ${targetBearing.roundToInt()}° ${MarineGeoUtils.cardinalDirection(targetBearing)}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = secondaryColor
-                        )
-                    }
 
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = MarineGeoUtils.formatDistance(targetDistanceMeters, settings.distanceUnit),
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = primaryColor
-                        )
-                        Text(
-                            text = steerText,
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = if (isOnCourse) primaryColor else tertiaryColor
-                        )
-                    }
-                }
-            } else {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Explore,
-                            contentDescription = null,
-                            tint = secondaryColor,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
+                        Column(horizontalAlignment = Alignment.End) {
                             Text(
-                                text = MarineGeoUtils.formatDecimalCoords(centerLat, centerLon),
-                                style = MaterialTheme.typography.labelMedium,
+                                text = MarineGeoUtils.formatDistance(targetDistanceMeters, settings.distanceUnit),
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = primaryColor
                             )
                             Text(
-                                text = "Ketuk ikon Pin di kanan untuk menandai spot karang pada peta.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                text = steerText,
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = if (isOnCourse) primaryColor else tertiaryColor
                             )
                         }
                     }
-                    Text(
-                        text = "Z${String.format(Locale.US, "%.1f", zoom)}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = secondaryColor
-                    )
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Explore,
+                                contentDescription = null,
+                                tint = secondaryColor,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = MarineGeoUtils.formatDecimalCoords(centerLat, centerLon),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = primaryColor
+                                )
+                                Text(
+                                    text = "Ketuk titik oranye di peta untuk info karang & spot gacor, atau tekan ikon kail di kanan.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Text(
+                            text = "Z${String.format(Locale.US, "%.1f", zoom)}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = secondaryColor
+                        )
+                    }
                 }
             }
         }
@@ -1366,6 +1726,45 @@ fun ChartplotterScreen(
                 )
                 pendingPinCoords = null
             }
+        )
+    }
+
+    if (showSpotAtlasDialog) {
+        BintanSpotAtlasDialog(
+            userLat = gpsTelemetry.latitude,
+            userLon = gpsTelemetry.longitude,
+            distanceUnit = settings.distanceUnit,
+            defaultShoreFirst = isShoreMode,
+            onSelectSpot = { spot ->
+                showSpotAtlasDialog = false
+                showReefHotspots = true
+                followVessel = false
+                selectedHotspot = spot
+                centerLat = spot.latitude
+                centerLon = spot.longitude
+                activeLayer = ChartBaseLayer.SATELLITE_REEF
+                zoom = if (spot.accessType == SpotAccessType.SHORE) 15.0 else 13.5
+            },
+            onDismiss = { showSpotAtlasDialog = false }
+        )
+    }
+
+    if (showOfflineDialog) {
+        OfflineMapDialog(
+            activeLayer = activeLayer,
+            centerLat = centerLat,
+            centerLon = centerLon,
+            offlineState = offlineState,
+            onStartDownload = {
+                tileManager.downloadOfflineRegion(
+                    layer = activeLayer,
+                    centerLat = centerLat,
+                    centerLon = centerLon
+                )
+            },
+            onCancelDownload = { tileManager.cancelOfflineDownload() },
+            onClearOffline = { tileManager.clearOfflineTiles() },
+            onDismiss = { showOfflineDialog = false }
         )
     }
 }
@@ -1547,4 +1946,164 @@ private fun RadarLegendDot(
         )
     }
 }
+
+@Composable
+private fun OfflineMapDialog(
+    activeLayer: ChartBaseLayer,
+    centerLat: Double,
+    centerLon: Double,
+    offlineState: OfflineMapState,
+    onStartDownload: () -> Unit,
+    onCancelDownload: () -> Unit,
+    onClearOffline: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val layerTitle = when (activeLayer) {
+        ChartBaseLayer.MARINE_DARK -> stringResource(R.string.map_layer_dark)
+        ChartBaseLayer.SATELLITE_REEF -> stringResource(R.string.map_layer_satellite)
+        ChartBaseLayer.OCEAN_BATHYMETRY -> stringResource(R.string.map_layer_bathymetry)
+        ChartBaseLayer.OSM_STANDARD -> stringResource(R.string.map_layer_osm)
+    }
+    val progress = if (offlineState.totalCount > 0) {
+        (offlineState.downloadedCount.toFloat() / offlineState.totalCount.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        icon = {
+            Icon(
+                imageVector = if (offlineState.savedTileCount > 0) {
+                    Icons.Rounded.OfflinePin
+                } else {
+                    Icons.Rounded.CloudDownload
+                },
+                contentDescription = "Ikon peta offline",
+                tint = MaterialTheme.colorScheme.primary
+            )
+        },
+        title = {
+            Text(
+                text = stringResource(R.string.map_offline_dialog_title),
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Unduh area peta di sekitar titik tengah saat ini agar karang, garis pantai, dan spot tetap tampil jernih meski sinyal hilang di laut.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "Layer aktif: $layerTitle",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Pusat: ${MarineGeoUtils.formatDecimalCoords(centerLat, centerLon)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                        Text(
+                            text = "Cakupan: Radius ±4,5 km • Zoom 11–16 (detail pantai & karang)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "Tersimpan: ${offlineState.savedTileCount} ubin (${String.format(Locale.US, "%.1f", offlineState.savedSizeMb)} MB)",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                if (offlineState.isDownloading) {
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                    )
+                }
+
+                if (!offlineState.statusMessage.isNullOrBlank()) {
+                    Text(
+                        text = offlineState.statusMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                if (offlineState.savedTileCount > 0 && !offlineState.isDownloading) {
+                    TextButton(
+                        onClick = onClearOffline,
+                        modifier = Modifier.testTag("clear_offline_map_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.DeleteOutline,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Hapus Peta Offline Tersimpan",
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (offlineState.isDownloading) {
+                Button(
+                    onClick = onCancelDownload,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    ),
+                    modifier = Modifier.testTag("cancel_offline_dialog_button")
+                ) {
+                    Text("BATALKAN")
+                }
+            } else {
+                Button(
+                    onClick = onStartDownload,
+                    modifier = Modifier.testTag("confirm_save_offline_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.CloudDownload,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("SIMPAN PETA OFFLINE")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Tutup")
+            }
+        }
+    )
+}
+
 

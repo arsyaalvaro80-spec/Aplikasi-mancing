@@ -379,11 +379,15 @@ private fun SonarNavHost(
         composable(ROUTE_WEATHER) {
             WeatherScreen(
                 weatherState = weatherState,
+                settings = settings,
                 onRefreshWeather = viewModel::refreshWeatherDashboard,
                 onOpenStormMap = { lat, lon ->
                     viewModel.requestOpenStormRadarMap(lat, lon)
                     onNavigate(ROUTE_MAP)
                 },
+                onSetStormAlerts = viewModel::setStormAlertsEnabled,
+                onSetTideAlerts = viewModel::setTideAlertsEnabled,
+                onSendTestNotification = viewModel::sendTestMarineNotification,
                 onOpenSettings = openSettings
             )
         }
@@ -440,6 +444,9 @@ private fun SonarNavHost(
                 onSetKeepScreenAwake = viewModel::setKeepScreenAwake,
                 onSetFishingMode = viewModel::setFishingMode,
                 onSetAiModelPreference = viewModel::setAiModelPreference,
+                onSetStormAlerts = viewModel::setStormAlertsEnabled,
+                onSetTideAlerts = viewModel::setTideAlertsEnabled,
+                onSendTestNotification = viewModel::sendTestMarineNotification,
                 onBack = { navController.popBackStack() }
             )
         }
