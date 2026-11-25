@@ -84,6 +84,7 @@ fun SonarCameraScreen(
     onImageSelected: (Bitmap) -> Unit,
     onClearImage: () -> Unit,
     onAnalyzeImage: () -> Unit,
+    onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -147,7 +148,8 @@ fun SonarCameraScreen(
                 title = stringResource(R.string.camera_title),
                 subtitle = stringResource(R.string.camera_subtitle),
                 statusText = if (capturedBitmap != null) "CITRA SIAP" else "STANDBY",
-                statusActive = capturedBitmap != null
+                statusActive = capturedBitmap != null,
+                onOpenSettings = onOpenSettings
             )
         }
 

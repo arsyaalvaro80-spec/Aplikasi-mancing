@@ -98,6 +98,38 @@ class MarineTileManager(context: Context) {
         return null
     }
 
+    /**
+     * Fetches transparent live RainViewer precipitation & storm radar tiles (NEXRAD scheme 6).
+     * RainViewer free public tiles are guaranteed up to zoom 7; higher map zoom levels crop & scale
+     * the exact sub-rect of the zoom 7 tile in ChartplotterScreen so radar clouds never blank out.
+     */
+    fun getRainRadarOverlayTile(
+        host: String,
+        framePath: String,
+        z: Int,
+        x: Int,
+        y: Int
+    ): ImageBitmap? {
+        if (z < 1 || z > RAIN_RADAR_MAX_ZOOM) return null
+        val key = "rainradar_${framePath}_${z}_${x}_${y}"
+        memoryCache.get(key)?.let { return it }
+        if (emptyTiles.contains(key) || failedTiles.contains(key)) return null
+
+        val cleanHost = host.trimEnd('/')
+        val url = "$cleanHost$framePath/256/$z/$x/$y/6/1_1.png"
+        requestTileAsync(
+            key = key,
+            layerId = "rainradar",
+            z = z,
+            x = x,
+            y = y,
+            url = url,
+            isOverlay = true,
+            persistToDisk = false
+        )
+        return null
+    }
+
     private fun buildBaseTileUrl(layer: ChartBaseLayer, z: Int, x: Int, y: Int): String {
         return when (layer) {
             ChartBaseLayer.MARINE_DARK,
@@ -118,17 +150,22 @@ class MarineTileManager(context: Context) {
         x: Int,
         y: Int,
         url: String,
-        isOverlay: Boolean
+        isOverlay: Boolean,
+        persistToDisk: Boolean = true
     ) {
         if (!inFlight.add(key)) return
         _loadStatus.update { it.copy(activeDownloads = it.activeDownloads + 1) }
 
         scope.launch {
             try {
-                val diskFile = File(File(cacheRoot, "$layerId/$z/$x").apply { mkdirs() }, "$y.tile")
+                val diskFile = if (persistToDisk) {
+                    File(File(cacheRoot, "$layerId/$z/$x").apply { mkdirs() }, "$y.tile")
+                } else {
+                    null
+                }
 
                 // 1. Check local disk cache first (supports offline use at sea)
-                if (diskFile.exists() && diskFile.length() > 0L) {
+                if (diskFile != null && diskFile.exists() && diskFile.length() > 0L) {
                     val bitmap = BitmapFactory.decodeFile(diskFile.absolutePath)
                     if (bitmap != null) {
                         memoryCache.put(key, bitmap.asImageBitmap())
@@ -178,7 +215,9 @@ class MarineTileManager(context: Context) {
                     }
                     val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
                     if (decoded != null) {
-                        runCatching { diskFile.writeBytes(bytes) }
+                        if (diskFile != null) {
+                            runCatching { diskFile.writeBytes(bytes) }
+                        }
                         memoryCache.put(key, decoded.asImageBitmap())
                         if (!isOverlay) {
                             _loadStatus.update { it.copy(loadedCount = it.loadedCount + 1, lastError = null) }
@@ -207,5 +246,6 @@ class MarineTileManager(context: Context) {
 
     companion object {
         private const val USER_AGENT = "BintanSonarAI/1.0 (Android Marine Chartplotter)"
+        const val RAIN_RADAR_MAX_ZOOM = 7
     }
 }

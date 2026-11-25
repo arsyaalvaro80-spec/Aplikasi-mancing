@@ -3,6 +3,7 @@
 
     <!-- Navigation Labels -->
     <string name="nav_radar">Radar</string>
+    <string name="nav_weather">Cuaca</string>
     <string name="nav_map">Peta</string>
     <string name="nav_waypoints">Spot</string>
     <string name="nav_sonar_camera">Kamera</string>
@@ -14,11 +15,20 @@
     <string name="map_layer_satellite">Satelit Karang</string>
     <string name="map_layer_osm">OSM</string>
     <string name="map_overlay_openseamap">OpenSeaMap</string>
+    <string name="map_overlay_storm_radar">+ Radar Badai</string>
     <string name="map_casting_rings">Jarak Lempar</string>
     <string name="map_shore_reef_legend">Terang = Karang/Pasir Dangkal  •  Biru Gelap = Palung (Target Lempar)</string>
     <string name="map_drop_pin_hint">Ketuk peta untuk menandai spot baru</string>
     <string name="map_follow_gps">Ikuti GPS</string>
     <string name="map_view_on_chart">Lihat di Peta</string>
+
+    <!-- Weather & Storm Radar Screen -->
+    <string name="weather_title">CUACA &amp; BADAI</string>
+    <string name="weather_subtitle">PRAKIRAAN 7 HARI &amp; RADAR HUJAN BINTAN</string>
+    <string name="btn_open_storm_radar_map">LIHAT RADAR HUJAN &amp; BADAI DI PETA</string>
+    <string name="weather_regional_storms_title">PANTAUAN HUJAN &amp; BADAI BINTAN</string>
+    <string name="weather_hourly_title">PRAKIRAAN PER JAM (24 JAM)</string>
+    <string name="weather_daily_title">PRAKIRAAN 7 HARI KE DEPAN</string>
 
     <!-- Radar & Prediction Screen -->
     <string name="radar_title">RADAR SONAR</string>
@@ -75,7 +85,7 @@
     <string name="btn_save_key">SIMPAN KEY</string>
     <string name="btn_clear_key">HAPUS</string>
     <string name="settings_key_saved">API Key tersimpan aman di SharedPreferences perangkat.</string>
-    <string name="settings_firebase_info">Firebase AI Logic aktif (gemini-3.8-flash + App Check). Analisis kondisi laut dan kamera sonar berjalan langsung dengan Gemini tanpa memerlukan API Key manual.</string>
+    <string name="settings_firebase_info">Firebase AI Logic aktif dengan cadangan otomatis 4 model Gemini 3. Analisis kondisi laut dan kamera sonar berjalan langsung tanpa memerlukan API Key manual.</string>
     <string name="settings_instruments_section">INSTRUMEN &amp; MODE MANCING</string>
     <string name="settings_fishing_mode">Gaya Mancing Utama</string>
     <string name="settings_depth_unit">Satuan Kedalaman</string>

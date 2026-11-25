@@ -19,11 +19,13 @@ import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Thunderstorm
 import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.Radar
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Thunderstorm
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -60,9 +62,11 @@ import com.example.ui.screens.RadarPredictionScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.SonarCameraScreen
 import com.example.ui.screens.WaypointScreen
+import com.example.ui.screens.WeatherScreen
 import com.example.viewmodel.SonarViewModel
 
 const val ROUTE_RADAR = "radar_prediction"
+const val ROUTE_WEATHER = "weather_radar"
 const val ROUTE_MAP = "chartplotter_map"
 const val ROUTE_WAYPOINTS = "waypoint_gps"
 const val ROUTE_SONAR_CAMERA = "sonar_camera"
@@ -76,13 +80,20 @@ private data class SonarDestination(
     val testTag: String
 )
 
-private val Destinations = listOf(
+private val BottomDestinations = listOf(
     SonarDestination(
         route = ROUTE_RADAR,
         labelRes = R.string.nav_radar,
         selectedIcon = Icons.Filled.Radar,
         unselectedIcon = Icons.Outlined.Radar,
         testTag = "nav_tab_radar"
+    ),
+    SonarDestination(
+        route = ROUTE_WEATHER,
+        labelRes = R.string.nav_weather,
+        selectedIcon = Icons.Filled.Thunderstorm,
+        unselectedIcon = Icons.Outlined.Thunderstorm,
+        testTag = "nav_tab_weather"
     ),
     SonarDestination(
         route = ROUTE_MAP,
@@ -104,14 +115,15 @@ private val Destinations = listOf(
         selectedIcon = Icons.Filled.CameraAlt,
         unselectedIcon = Icons.Outlined.CameraAlt,
         testTag = "nav_tab_camera"
-    ),
-    SonarDestination(
-        route = ROUTE_SETTINGS,
-        labelRes = R.string.nav_settings,
-        selectedIcon = Icons.Filled.Settings,
-        unselectedIcon = Icons.Outlined.Settings,
-        testTag = "nav_tab_settings"
     )
+)
+
+private val RailDestinations = BottomDestinations + SonarDestination(
+    route = ROUTE_SETTINGS,
+    labelRes = R.string.nav_settings,
+    selectedIcon = Icons.Filled.Settings,
+    unselectedIcon = Icons.Outlined.Settings,
+    testTag = "nav_tab_settings"
 )
 
 @Composable
@@ -133,6 +145,8 @@ fun BintanSonarApp(
     val capturedBitmap by viewModel.capturedBitmap.collectAsStateWithLifecycle()
     val sonarVisionState by viewModel.sonarVisionState.collectAsStateWithLifecycle()
     val tideState by viewModel.tideState.collectAsStateWithLifecycle()
+    val weatherState by viewModel.weatherState.collectAsStateWithLifecycle()
+    val stormMapRequest by viewModel.stormMapRequest.collectAsStateWithLifecycle()
 
     // Lifecycle-aware GPS & Compass sensor activation
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -190,7 +204,7 @@ fun BintanSonarApp(
                         containerColor = MaterialTheme.colorScheme.surface,
                         modifier = Modifier.fillMaxHeight()
                     ) {
-                        Destinations.forEach { dest ->
+                        RailDestinations.forEach { dest ->
                             val selected = currentRoute == dest.route
                             val label = stringResource(dest.labelRes)
                             NavigationRailItem(
@@ -241,6 +255,8 @@ fun BintanSonarApp(
                             capturedBitmap = capturedBitmap,
                             sonarVisionState = sonarVisionState,
                             tideState = tideState,
+                            weatherState = weatherState,
+                            stormMapRequest = stormMapRequest,
                             onNavigate = onNavigate,
                             modifier = contentModifier
                         )
@@ -256,7 +272,7 @@ fun BintanSonarApp(
                         containerColor = MaterialTheme.colorScheme.surface,
                         windowInsets = WindowInsets.navigationBars
                     ) {
-                        Destinations.forEach { dest ->
+                        BottomDestinations.forEach { dest ->
                             val selected = currentRoute == dest.route
                             val label = stringResource(dest.labelRes)
                             NavigationBarItem(
@@ -301,6 +317,8 @@ fun BintanSonarApp(
                     capturedBitmap = capturedBitmap,
                     sonarVisionState = sonarVisionState,
                     tideState = tideState,
+                    weatherState = weatherState,
+                    stormMapRequest = stormMapRequest,
                     onNavigate = onNavigate,
                     modifier = Modifier
                         .fillMaxSize()
@@ -325,9 +343,17 @@ private fun SonarNavHost(
     capturedBitmap: android.graphics.Bitmap?,
     sonarVisionState: com.example.viewmodel.SonarVisionUiState,
     tideState: com.example.viewmodel.TideUiState,
+    weatherState: com.example.viewmodel.WeatherUiState,
+    stormMapRequest: com.example.viewmodel.StormMapFocusRequest?,
     onNavigate: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val openSettings: () -> Unit = {
+        navController.navigate(ROUTE_SETTINGS) {
+            launchSingleTop = true
+        }
+    }
+
     NavHost(
         navController = navController,
         startDestination = ROUTE_RADAR,
@@ -346,7 +372,19 @@ private fun SonarNavHost(
                 },
                 onRefreshTide = viewModel::refreshTideForecast,
                 onSetFishingMode = viewModel::setFishingMode,
-                onLocationPermissionResult = viewModel::onLocationPermissionResult
+                onLocationPermissionResult = viewModel::onLocationPermissionResult,
+                onOpenSettings = openSettings
+            )
+        }
+        composable(ROUTE_WEATHER) {
+            WeatherScreen(
+                weatherState = weatherState,
+                onRefreshWeather = viewModel::refreshWeatherDashboard,
+                onOpenStormMap = { lat, lon ->
+                    viewModel.requestOpenStormRadarMap(lat, lon)
+                    onNavigate(ROUTE_MAP)
+                },
+                onOpenSettings = openSettings
             )
         }
         composable(ROUTE_MAP) {
@@ -358,6 +396,10 @@ private fun SonarNavHost(
                 waypoints = waypoints,
                 selectedWaypoint = selectedWaypoint,
                 vesselTrack = vesselTrack,
+                weatherState = weatherState,
+                stormMapRequest = stormMapRequest,
+                onConsumeStormMapRequest = viewModel::consumeStormMapRequest,
+                onRefreshWeather = viewModel::refreshWeatherDashboard,
                 onSelectWaypoint = viewModel::selectWaypoint,
                 onSaveWaypointAt = viewModel::saveWaypointAt,
                 onLocationPermissionResult = viewModel::onLocationPermissionResult
@@ -373,7 +415,8 @@ private fun SonarNavHost(
                 onSaveWaypoint = viewModel::saveCurrentSpot,
                 onSelectWaypoint = viewModel::selectWaypoint,
                 onDeleteWaypoint = viewModel::deleteWaypoint,
-                onOpenChartplotter = { onNavigate(ROUTE_MAP) }
+                onOpenChartplotter = { onNavigate(ROUTE_MAP) },
+                onOpenSettings = openSettings
             )
         }
         composable(ROUTE_SONAR_CAMERA) {
@@ -382,7 +425,8 @@ private fun SonarNavHost(
                 visionState = sonarVisionState,
                 onImageSelected = viewModel::setCapturedSonarImage,
                 onClearImage = viewModel::clearCapturedSonarImage,
-                onAnalyzeImage = viewModel::analyzeCapturedSonarImage
+                onAnalyzeImage = viewModel::analyzeCapturedSonarImage,
+                onOpenSettings = openSettings
             )
         }
         composable(ROUTE_SETTINGS) {
@@ -394,7 +438,9 @@ private fun SonarNavHost(
                 onSetDistanceUnit = viewModel::setDistanceUnit,
                 onSetSonarRangeMeters = viewModel::setSonarRangeMeters,
                 onSetKeepScreenAwake = viewModel::setKeepScreenAwake,
-                onSetFishingMode = viewModel::setFishingMode
+                onSetFishingMode = viewModel::setFishingMode,
+                onSetAiModelPreference = viewModel::setAiModelPreference,
+                onBack = { navController.popBackStack() }
             )
         }
     }

@@ -2,6 +2,7 @@ package com.example.data.ai
 
 import android.graphics.Bitmap
 import android.util.Log
+import com.example.data.preferences.AiModelPreference
 import com.example.data.preferences.FishingMode
 import com.google.firebase.Firebase
 import com.google.firebase.ai.GenerativeModel
@@ -19,14 +20,19 @@ import java.net.UnknownHostException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 
 private const val TAG = "FirebaseSonarAI"
-// Ultra-fast high-volume Gemini 3 workhorse model as primary to avoid peak-hour 503 demand spikes
-private const val GEMINI_PRIMARY_MODEL_NAME = "gemini-3.5-flash-lite"
-private const val GEMINI_FALLBACK_MODEL_NAME = "gemini-3.8-flash"
-private const val PER_ATTEMPT_TIMEOUT_MS = 35_000L
-private const val RETRY_DELAY_MS = 1_500L
+private const val PER_ATTEMPT_TIMEOUT_MS = 25_000L
+private const val RETRY_DELAY_MS = 1_200L
+
+private val GEMINI_FAILOVER_POOL = listOf(
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.8-flash",
+    "gemini-3-flash-preview"
+)
 
 data class MarinePrediction(
     val feedingScore: Int,
@@ -39,6 +45,7 @@ data class MarinePrediction(
     val baitRecommendations: List<String>,
     val tacticalAdvice: String,
     val analyzedCoordinates: String,
+    val modelUsed: String = "",
     val isSampleMode: Boolean = false,
     val notice: String = ""
 )
@@ -51,6 +58,7 @@ data class SonarVisionAnalysis(
     val targetDepthRange: String,
     val recommendedLure: String,
     val confidencePercent: Int,
+    val modelUsed: String = "",
     val isSampleMode: Boolean = false,
     val notice: String = ""
 )
@@ -61,14 +69,16 @@ interface SonarAiRepository {
         longitude: Double,
         accuracyMeters: Float?,
         liveTideContext: String? = null,
-        fishingMode: FishingMode = FishingMode.SHORE
+        fishingMode: FishingMode = FishingMode.SHORE,
+        preferredModel: AiModelPreference = AiModelPreference.AUTO
     ): Result<MarinePrediction>
 
     suspend fun analyzeSonarImage(
         bitmap: Bitmap,
         latitude: Double?,
         longitude: Double?,
-        fishingMode: FishingMode = FishingMode.SHORE
+        fishingMode: FishingMode = FishingMode.SHORE,
+        preferredModel: AiModelPreference = AiModelPreference.AUTO
     ): Result<SonarVisionAnalysis>
 }
 
@@ -139,45 +149,51 @@ class FirebaseSonarAiRepository : SonarAiRepository {
         )
     )
 
-    // Lazy initialization per Firebase AI Logic contract (never evaluate eagerly at construction time)
-    private val marinePredictionModel by lazy {
-        Firebase.ai.generativeModel(
-            modelName = GEMINI_PRIMARY_MODEL_NAME,
-            generationConfig = generationConfig {
-                responseMimeType = "application/json"
-                responseSchema = marinePredictionSchema
-            }
-        )
+    // Lazy per-model caches so Firebase.ai is only evaluated on first inference
+    private val marineModelCache = ConcurrentHashMap<String, GenerativeModel>()
+    private val visionModelCache = ConcurrentHashMap<String, GenerativeModel>()
+
+    @Volatile
+    private var lastHealthyModelId: String? = null
+
+    private fun getMarineModel(modelId: String): GenerativeModel =
+        marineModelCache.getOrPut(modelId) {
+            Firebase.ai.generativeModel(
+                modelName = modelId,
+                generationConfig = generationConfig {
+                    responseMimeType = "application/json"
+                    responseSchema = marinePredictionSchema
+                }
+            )
+        }
+
+    private fun getVisionModel(modelId: String): GenerativeModel =
+        visionModelCache.getOrPut(modelId) {
+            Firebase.ai.generativeModel(
+                modelName = modelId,
+                generationConfig = generationConfig {
+                    responseMimeType = "application/json"
+                    responseSchema = sonarVisionSchema
+                }
+            )
+        }
+
+    private fun buildCandidateOrder(preferredModel: AiModelPreference): List<String> {
+        val ordered = LinkedHashSet<String>()
+        preferredModel.modelId?.let { ordered.add(it) }
+        if (preferredModel == AiModelPreference.AUTO) {
+            lastHealthyModelId?.let { ordered.add(it) }
+        }
+        ordered.addAll(GEMINI_FAILOVER_POOL)
+        return ordered.toList()
     }
 
-    private val marinePredictionFallbackModel by lazy {
-        Firebase.ai.generativeModel(
-            modelName = GEMINI_FALLBACK_MODEL_NAME,
-            generationConfig = generationConfig {
-                responseMimeType = "application/json"
-                responseSchema = marinePredictionSchema
-            }
-        )
-    }
-
-    private val sonarVisionModel by lazy {
-        Firebase.ai.generativeModel(
-            modelName = GEMINI_PRIMARY_MODEL_NAME,
-            generationConfig = generationConfig {
-                responseMimeType = "application/json"
-                responseSchema = sonarVisionSchema
-            }
-        )
-    }
-
-    private val sonarVisionFallbackModel by lazy {
-        Firebase.ai.generativeModel(
-            modelName = GEMINI_FALLBACK_MODEL_NAME,
-            generationConfig = generationConfig {
-                responseMimeType = "application/json"
-                responseSchema = sonarVisionSchema
-            }
-        )
+    private fun formatModelDisplayName(modelId: String): String = when (modelId) {
+        "gemini-3.5-flash-lite" -> "Gemini 3.5 Flash-Lite"
+        "gemini-3.1-flash-lite" -> "Gemini 3.1 Flash-Lite"
+        "gemini-3.8-flash" -> "Gemini 3.8 Flash"
+        "gemini-3-flash-preview" -> "Gemini 3 Flash Preview"
+        else -> modelId
     }
 
     private fun collectErrorMessage(error: Throwable): String {
@@ -219,45 +235,47 @@ class FirebaseSonarAiRepository : SonarAiRepository {
     }
 
     private suspend fun executeWithResilience(
-        primary: GenerativeModel,
-        fallback: GenerativeModel,
+        preferredModel: AiModelPreference,
+        modelProvider: (String) -> GenerativeModel,
         call: suspend (GenerativeModel) -> GenerateContentResponse
-    ): GenerateContentResponse {
-        // Attempt 1: Primary high-availability model (gemini-3.5-flash-lite)
-        val firstError = try {
-            return withTimeout(PER_ATTEMPT_TIMEOUT_MS) { call(primary) }
-        } catch (e: TimeoutCancellationException) {
-            Log.w(TAG, "Primary model ($GEMINI_PRIMARY_MODEL_NAME) timed out; trying fallback $GEMINI_FALLBACK_MODEL_NAME", e)
-            e
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            if (isNonRetryableLocalOrAuthError(e)) throw e
-            Log.w(TAG, "Primary model ($GEMINI_PRIMARY_MODEL_NAME) failed; trying fallback $GEMINI_FALLBACK_MODEL_NAME", e)
-            e
+    ): Pair<String, GenerateContentResponse> {
+        val candidates = buildCandidateOrder(preferredModel)
+        var lastError: Throwable? = null
+        var sawTransientError = false
+
+        for (modelId in candidates) {
+            try {
+                val response = withTimeout(PER_ATTEMPT_TIMEOUT_MS) {
+                    call(modelProvider(modelId))
+                }
+                lastHealthyModelId = modelId
+                return modelId to response
+            } catch (e: TimeoutCancellationException) {
+                sawTransientError = true
+                lastError = e
+                Log.w(TAG, "Model $modelId timed out; trying next Gemini fallback...", e)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (isNonRetryableLocalOrAuthError(e)) throw e
+                if (isTransientServerOrBusyError(e)) sawTransientError = true
+                lastError = e
+                Log.w(TAG, "Model $modelId failed (${e.localizedMessage}); trying next Gemini fallback...", e)
+            }
         }
 
-        // Attempt 2: Fallback model (gemini-3.8-flash)
-        val secondError = try {
-            return withTimeout(PER_ATTEMPT_TIMEOUT_MS) { call(fallback) }
-        } catch (e: TimeoutCancellationException) {
-            Log.w(TAG, "Fallback model ($GEMINI_FALLBACK_MODEL_NAME) timed out", e)
-            e
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            if (isNonRetryableLocalOrAuthError(e)) throw e
-            Log.w(TAG, "Fallback model ($GEMINI_FALLBACK_MODEL_NAME) failed", e)
-            e
-        }
-
-        // Attempt 3: Brief backoff retry on primary if both attempts hit transient load/timeout
-        if (isTransientServerOrBusyError(firstError) || isTransientServerOrBusyError(secondError)) {
+        // Final short backoff retry on the top candidate if transient congestion hit all models
+        if (sawTransientError) {
             delay(RETRY_DELAY_MS)
-            return withTimeout(PER_ATTEMPT_TIMEOUT_MS) { call(primary) }
+            val retryModelId = candidates.first()
+            val response = withTimeout(PER_ATTEMPT_TIMEOUT_MS) {
+                call(modelProvider(retryModelId))
+            }
+            lastHealthyModelId = retryModelId
+            return retryModelId to response
         }
 
-        throw secondError
+        throw lastError ?: IllegalStateException("Semua model Gemini gagal merespons.")
     }
 
     private fun toFriendlyFailure(error: Throwable): IllegalStateException {
@@ -292,7 +310,8 @@ class FirebaseSonarAiRepository : SonarAiRepository {
         longitude: Double,
         accuracyMeters: Float?,
         liveTideContext: String?,
-        fishingMode: FishingMode
+        fishingMode: FishingMode,
+        preferredModel: AiModelPreference
     ): Result<MarinePrediction> {
         return try {
             val timestamp = SimpleDateFormat("EEEE, dd MMM yyyy HH:mm z", Locale("id", "ID")).format(Date())
@@ -331,9 +350,9 @@ class FirebaseSonarAiRepository : SonarAiRepository {
                 """.trimIndent()
             }
 
-            val response = executeWithResilience(
-                primary = marinePredictionModel,
-                fallback = marinePredictionFallbackModel
+            val (usedModelId, response) = executeWithResilience(
+                preferredModel = preferredModel,
+                modelProvider = ::getMarineModel
             ) { model ->
                 model.generateContent(prompt)
             }
@@ -369,6 +388,7 @@ class FirebaseSonarAiRepository : SonarAiRepository {
                     baitRecommendations = baits,
                     tacticalAdvice = json.optString("tacticalAdvice", ""),
                     analyzedCoordinates = coordLabel,
+                    modelUsed = formatModelDisplayName(usedModelId),
                     isSampleMode = false,
                     notice = ""
                 )
@@ -388,7 +408,8 @@ class FirebaseSonarAiRepository : SonarAiRepository {
         bitmap: Bitmap,
         latitude: Double?,
         longitude: Double?,
-        fishingMode: FishingMode
+        fishingMode: FishingMode,
+        preferredModel: AiModelPreference
     ): Result<SonarVisionAnalysis> {
         return try {
             val safeBitmap = downscaleForVision(bitmap, maxSide = 1024)
@@ -423,9 +444,9 @@ class FirebaseSonarAiRepository : SonarAiRepository {
                 image(safeBitmap)
                 text(prompt)
             }
-            val response = executeWithResilience(
-                primary = sonarVisionModel,
-                fallback = sonarVisionFallbackModel
+            val (usedModelId, response) = executeWithResilience(
+                preferredModel = preferredModel,
+                modelProvider = ::getVisionModel
             ) { model ->
                 model.generateContent(imageRequest)
             }
@@ -443,6 +464,7 @@ class FirebaseSonarAiRepository : SonarAiRepository {
                     targetDepthRange = json.optString("targetDepthRange", "10 – 20 meter"),
                     recommendedLure = json.optString("recommendedLure", "Sesuaikan jig/umpan dengan arus."),
                     confidencePercent = json.optInt("confidencePercent", 80).coerceIn(0, 100),
+                    modelUsed = formatModelDisplayName(usedModelId),
                     isSampleMode = false,
                     notice = ""
                 )

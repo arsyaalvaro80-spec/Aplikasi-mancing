@@ -3,6 +3,8 @@ package com.example.ui.screens
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Explore
@@ -22,6 +25,7 @@ import androidx.compose.material.icons.rounded.GpsFixed
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -33,6 +37,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.data.preferences.AiModelPreference
 import com.example.data.preferences.DepthUnit
 import com.example.data.preferences.DistanceUnit
 import com.example.data.preferences.FishingMode
@@ -43,6 +48,7 @@ import com.example.sensors.MarineGeoUtils
 import com.example.ui.components.MarineScreenHeader
 import kotlin.math.roundToInt
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     settings: SonarSettings,
@@ -53,6 +59,8 @@ fun SettingsScreen(
     onSetSonarRangeMeters: (Int) -> Unit,
     onSetKeepScreenAwake: (Boolean) -> Unit,
     onSetFishingMode: (FishingMode) -> Unit,
+    onSetAiModelPreference: (AiModelPreference) -> Unit,
+    onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -61,12 +69,33 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            MarineScreenHeader(
-                title = stringResource(R.string.settings_title),
-                subtitle = stringResource(R.string.settings_subtitle),
-                statusText = "GEMINI AI AKTIF",
-                statusActive = true
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (onBack != null) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("settings_back_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = "Kembali",
+                            tint = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+                MarineScreenHeader(
+                    title = stringResource(R.string.settings_title),
+                    subtitle = stringResource(R.string.settings_subtitle),
+                    statusText = "GEMINI AI AKTIF",
+                    statusActive = true,
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
 
         // Firebase AI Logic Status Card (no manual API key needed)
@@ -118,6 +147,38 @@ fun SettingsScreen(
 
                     Text(
                         text = stringResource(R.string.settings_firebase_info),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    Text(
+                        text = "PILIH MODEL GEMINI AI (CADANGAN OTOMATIS 4 MODEL)",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        AiModelPreference.entries.forEach { option ->
+                            FilterChip(
+                                selected = settings.aiModelPreference == option,
+                                onClick = { onSetAiModelPreference(option) },
+                                label = { Text(option.label) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.primary
+                                ),
+                                modifier = Modifier.testTag("ai_model_${option.name.lowercase()}")
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Mode Otomatis selalu memulai dari model paling stabil & cepat, lalu otomatis pindah ke 3 model cadangan Gemini 3 lainnya bila server sedang padat.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

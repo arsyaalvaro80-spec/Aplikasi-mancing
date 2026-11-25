@@ -30,6 +30,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddLocationAlt
 import androidx.compose.material.icons.rounded.CenterFocusStrong
+import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.GpsFixed
@@ -38,6 +40,7 @@ import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Sailing
+import androidx.compose.material.icons.rounded.Thunderstorm
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -88,11 +91,14 @@ import com.example.data.map.MarineTileManager
 import com.example.data.preferences.DepthUnit
 import com.example.data.preferences.FishingMode
 import com.example.data.preferences.SonarSettings
+import com.example.data.weather.WeatherSeverity
 import com.example.sensors.CompassTelemetry
 import com.example.sensors.GpsTelemetry
 import com.example.sensors.LatLon
 import com.example.sensors.MarineGeoUtils
 import com.example.sensors.WebMercator
+import com.example.viewmodel.StormMapFocusRequest
+import com.example.viewmodel.WeatherUiState
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -111,6 +117,10 @@ fun ChartplotterScreen(
     waypoints: List<WaypointEntity>,
     selectedWaypoint: WaypointEntity?,
     vesselTrack: List<LatLon>,
+    weatherState: WeatherUiState,
+    stormMapRequest: StormMapFocusRequest?,
+    onConsumeStormMapRequest: () -> Unit,
+    onRefreshWeather: () -> Unit,
     onSelectWaypoint: (Long) -> Unit,
     onSaveWaypointAt: (name: String, lat: Double, lon: Double, depthMeters: Double, targetFish: String, notes: String) -> Unit,
     onLocationPermissionResult: (Boolean) -> Unit,
@@ -130,6 +140,8 @@ fun ChartplotterScreen(
     }
     var showOpenSeaMap by remember { mutableStateOf(!isShoreMode) }
     var showCastingRings by remember { mutableStateOf(isShoreMode) }
+    var showStormRadar by remember { mutableStateOf(false) }
+    var selectedRadarFrameIdx by remember { mutableStateOf(-1) }
     var followVessel by remember { mutableStateOf(true) }
     var dropPinMode by remember { mutableStateOf(false) }
     var pendingPinCoords by remember { mutableStateOf<LatLon?>(null) }
@@ -140,8 +152,38 @@ fun ChartplotterScreen(
     var zoom by remember { mutableDoubleStateOf(if (isShoreMode && gpsTelemetry.isLiveFix) 15.2 else 11.2) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
 
+    val weatherData = (weatherState as? WeatherUiState.Ready)?.data
+    val radarMeta = weatherData?.radarMetadata
+    val activeRadarFrame = radarMeta?.let { meta ->
+        val idx = if (selectedRadarFrameIdx in meta.frames.indices) selectedRadarFrameIdx else meta.latestFrameIndex
+        meta.frames.getOrNull(idx)
+    }
+
+    LaunchedEffect(radarMeta?.frames?.size) {
+        if (radarMeta != null && selectedRadarFrameIdx !in radarMeta.frames.indices) {
+            selectedRadarFrameIdx = radarMeta.latestFrameIndex
+        }
+    }
+
+    LaunchedEffect(stormMapRequest?.id) {
+        val req = stormMapRequest ?: return@LaunchedEffect
+        showStormRadar = true
+        followVessel = false
+        if (req.latitude != null && req.longitude != null) {
+            centerLat = req.latitude
+            centerLon = req.longitude
+            zoom = 11.2
+        } else {
+            // Frame entire Pulau Bintan & Singapore Strait storm field
+            centerLat = 1.07
+            centerLon = 104.46
+            zoom = 9.5
+        }
+        onConsumeStormMapRequest()
+    }
+
     LaunchedEffect(isShoreMode) {
-        if (isShoreMode) {
+        if (isShoreMode && !showStormRadar) {
             activeLayer = ChartBaseLayer.SATELLITE_REEF
             showCastingRings = true
             zoom = zoom.coerceAtMost(ChartBaseLayer.SATELLITE_REEF.maxZoom.toDouble())
@@ -378,6 +420,117 @@ fun ChartplotterScreen(
                                 dstSize = dstSize
                             )
                         }
+                    }
+
+                    // Live RainViewer Precipitation & Storm Radar Overlay (supports native & high-zoom crop)
+                    if (showStormRadar && radarMeta != null && activeRadarFrame != null) {
+                        val radarZ = tileZ.coerceAtMost(MarineTileManager.RAIN_RADAR_MAX_ZOOM)
+                        val zoomDiff = (tileZ - radarZ).coerceAtLeast(0)
+                        val scaleFactor = 1 shl zoomDiff
+                        val radarX = tx shr zoomDiff
+                        val radarY = ty shr zoomDiff
+                        val radarTile = tileManager.getRainRadarOverlayTile(
+                            host = radarMeta.host,
+                            framePath = activeRadarFrame.path,
+                            z = radarZ,
+                            x = radarX,
+                            y = radarY
+                        )
+                        if (radarTile != null) {
+                            if (zoomDiff == 0) {
+                                drawImage(
+                                    image = radarTile,
+                                    dstOffset = dstOffset,
+                                    dstSize = dstSize,
+                                    alpha = 0.68f
+                                )
+                            } else {
+                                val subX = tx and (scaleFactor - 1)
+                                val subY = ty and (scaleFactor - 1)
+                                val srcStepW = (radarTile.width.toFloat() / scaleFactor.toFloat())
+                                val srcStepH = (radarTile.height.toFloat() / scaleFactor.toFloat())
+                                val srcOffset = IntOffset(
+                                    x = floor(subX * srcStepW).toInt().coerceIn(0, radarTile.width - 1),
+                                    y = floor(subY * srcStepH).toInt().coerceIn(0, radarTile.height - 1)
+                                )
+                                val srcSize = IntSize(
+                                    width = ceil(srcStepW).toInt().coerceAtLeast(1)
+                                        .coerceAtMost(radarTile.width - srcOffset.x),
+                                    height = ceil(srcStepH).toInt().coerceAtLeast(1)
+                                        .coerceAtMost(radarTile.height - srcOffset.y)
+                                )
+                                drawImage(
+                                    image = radarTile,
+                                    srcOffset = srcOffset,
+                                    srcSize = srcSize,
+                                    dstOffset = dstOffset,
+                                    dstSize = dstSize,
+                                    alpha = 0.68f
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2b. Live Regional Bintan Storm & Rain Zone Markers when Storm Radar is active
+            if (showStormRadar && weatherData != null) {
+                weatherData.regionalZones.forEach { zone ->
+                    val (zx, zy) = WebMercator.latLonToScreen(
+                        targetLat = zone.latitude,
+                        targetLon = zone.longitude,
+                        centerLat = centerLat,
+                        centerLon = centerLon,
+                        zoom = zoom,
+                        baseTilePx = baseTilePx,
+                        viewportWidth = widthD,
+                        viewportHeight = heightD
+                    )
+                    if (zx in -120f..(size.width + 120f) && zy in -120f..(size.height + 120f)) {
+                        val zoneColor = when (zone.severity) {
+                            WeatherSeverity.STORM -> errorColor
+                            WeatherSeverity.HEAVY_RAIN -> Color(0xFFFF8A3D)
+                            WeatherSeverity.RAIN -> tertiaryColor
+                            WeatherSeverity.CLOUDY -> secondaryColor
+                            WeatherSeverity.CLEAR -> primaryColor
+                        }
+                        val haloRadius = when (zone.severity) {
+                            WeatherSeverity.STORM -> 42.dp.toPx()
+                            WeatherSeverity.HEAVY_RAIN -> 34.dp.toPx()
+                            WeatherSeverity.RAIN -> 28.dp.toPx()
+                            else -> 18.dp.toPx()
+                        }
+                        val zoneCenter = Offset(zx, zy)
+                        drawCircle(
+                            color = zoneColor.copy(alpha = if (zone.severity.rank >= WeatherSeverity.RAIN.rank) 0.28f else 0.14f),
+                            radius = haloRadius,
+                            center = zoneCenter
+                        )
+                        drawCircle(
+                            color = zoneColor.copy(alpha = 0.85f),
+                            radius = haloRadius * 0.55f,
+                            center = zoneCenter,
+                            style = Stroke(width = 2.dp.toPx())
+                        )
+                        drawCircle(
+                            color = zoneColor,
+                            radius = 6.dp.toPx(),
+                            center = zoneCenter
+                        )
+                        val shortName = zone.name.substringBefore(" /")
+                        val badgeSuffix = when (zone.severity) {
+                            WeatherSeverity.STORM -> "BADAI"
+                            WeatherSeverity.HEAVY_RAIN -> "LEBAT ${String.format(Locale.US, "%.1f", zone.precipitationMm)}mm"
+                            WeatherSeverity.RAIN -> "HUJAN ${String.format(Locale.US, "%.1f", zone.precipitationMm)}mm"
+                            WeatherSeverity.CLOUDY -> "AWAN ${String.format(Locale.US, "%.0f", zone.windGustsKnots)}kn"
+                            WeatherSeverity.CLEAR -> "CERAH ${String.format(Locale.US, "%.0f", zone.windGustsKnots)}kn"
+                        }
+                        drawContext.canvas.nativeCanvas.drawText(
+                            "$shortName • $badgeSuffix",
+                            zx + 10.dp.toPx(),
+                            zy - 8.dp.toPx(),
+                            labelTextPaint
+                        )
                     }
                 }
             }
@@ -661,6 +814,39 @@ fun ChartplotterScreen(
                     modifier = Modifier.testTag("map_casting_rings_toggle")
                 )
                 FilterChip(
+                    selected = showStormRadar,
+                    onClick = {
+                        showStormRadar = !showStormRadar
+                        if (showStormRadar) {
+                            if (radarMeta == null) onRefreshWeather()
+                            if (zoom > 11.5) {
+                                followVessel = false
+                                zoom = 9.8
+                            }
+                        }
+                    },
+                    label = {
+                        Text(
+                            text = stringResource(R.string.map_overlay_storm_radar),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Rounded.Thunderstorm,
+                            contentDescription = "Aktifkan radar hujan dan badai",
+                            modifier = Modifier.size(15.dp)
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = surfaceColor.copy(alpha = 0.90f),
+                        selectedContainerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.95f),
+                        selectedLabelColor = errorColor,
+                        selectedLeadingIconColor = errorColor
+                    ),
+                    modifier = Modifier.testTag("map_storm_radar_toggle")
+                )
+                FilterChip(
                     selected = showOpenSeaMap,
                     onClick = { showOpenSeaMap = !showOpenSeaMap },
                     label = {
@@ -686,7 +872,107 @@ fun ChartplotterScreen(
                 )
             }
 
-            if (activeLayer == ChartBaseLayer.SATELLITE_REEF && showCastingRings) {
+            // Live Storm Radar Legend & Time-Frame Bar
+            if (showStormRadar) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = surfaceColor.copy(alpha = 0.93f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, errorColor.copy(alpha = 0.65f), RoundedCornerShape(12.dp))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Thunderstorm,
+                                    contentDescription = null,
+                                    tint = errorColor,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = if (activeRadarFrame != null) {
+                                        "RADAR HUJAN • ${activeRadarFrame.timeLabel}"
+                                    } else {
+                                        "RADAR HUJAN & BADAI BINTAN"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = textPrimaryColor
+                                )
+                            }
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (radarMeta != null && radarMeta.frames.size > 1) {
+                                    val curIdx = if (selectedRadarFrameIdx in radarMeta.frames.indices) {
+                                        selectedRadarFrameIdx
+                                    } else {
+                                        radarMeta.latestFrameIndex
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            selectedRadarFrameIdx = (curIdx - 1).coerceAtLeast(0)
+                                        },
+                                        enabled = curIdx > 0,
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.ChevronLeft,
+                                            contentDescription = "Frame radar sebelumnya",
+                                            tint = secondaryColor,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            selectedRadarFrameIdx = (curIdx + 1).coerceAtMost(radarMeta.frames.lastIndex)
+                                        },
+                                        enabled = curIdx < radarMeta.frames.lastIndex,
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.ChevronRight,
+                                            contentDescription = "Frame radar berikutnya",
+                                            tint = secondaryColor,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                                IconButton(
+                                    onClick = onRefreshWeather,
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Refresh,
+                                        contentDescription = "Segarkan radar hujan",
+                                        tint = primaryColor,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadarLegendDot(color = Color(0xFF38BDF8), label = "Gerimis")
+                            RadarLegendDot(color = Color(0xFF22C55E), label = "Hujan")
+                            RadarLegendDot(color = Color(0xFFFACC15), label = "Lebat")
+                            RadarLegendDot(color = Color(0xFFEF4444), label = "Badai Petir")
+                        }
+                    }
+                }
+            } else if (activeLayer == ChartBaseLayer.SATELLITE_REEF && showCastingRings) {
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = surfaceColor.copy(alpha = 0.86f),
@@ -1238,3 +1524,27 @@ private fun DropPinWaypointDialog(
         }
     )
 }
+
+@Composable
+private fun RadarLegendDot(
+    color: Color,
+    label: String
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(color)
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+

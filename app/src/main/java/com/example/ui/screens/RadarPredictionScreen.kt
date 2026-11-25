@@ -82,6 +82,7 @@ fun RadarPredictionScreen(
     onRefreshTide: () -> Unit,
     onSetFishingMode: (FishingMode) -> Unit,
     onLocationPermissionResult: (Boolean) -> Unit,
+    onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val locationPermissionLauncher = rememberLauncherForActivityResult(
@@ -120,7 +121,8 @@ fun RadarPredictionScreen(
                 title = stringResource(R.string.radar_title),
                 subtitle = stringResource(R.string.radar_subtitle),
                 statusText = gpsBadgeText,
-                statusActive = gpsTelemetry.isLiveFix
+                statusActive = gpsTelemetry.isLiveFix,
+                onOpenSettings = onOpenSettings
             )
         }
 
@@ -488,6 +490,14 @@ private fun MarinePredictionContent(prediction: MarinePrediction) {
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.secondary
                     )
+                    if (prediction.modelUsed.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "AI: ${prediction.modelUsed}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = prediction.tacticalAdvice,

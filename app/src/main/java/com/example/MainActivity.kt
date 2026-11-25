@@ -15,6 +15,7 @@ import com.example.data.local.WaypointRepository
 import com.example.data.map.MarineTileManager
 import com.example.data.marine.TideMarineRepository
 import com.example.data.preferences.SonarPreferences
+import com.example.data.weather.WeatherRadarRepository
 import com.example.sensors.CompassSensorManager
 import com.example.sensors.LocationTracker
 import com.example.ui.BintanSonarApp
@@ -33,7 +34,8 @@ class MainActivity : ComponentActivity() {
             locationTracker = LocationTracker(appContext),
             compassSensorManager = CompassSensorManager(appContext),
             tileManager = MarineTileManager(appContext),
-            tideRepository = TideMarineRepository()
+            tideRepository = TideMarineRepository(),
+            weatherRepository = WeatherRadarRepository()
         )
     }
 

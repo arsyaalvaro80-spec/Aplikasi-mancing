@@ -9,6 +9,7 @@ import com.example.data.ai.SonarAiRepository
 import com.example.data.ai.SonarVisionAnalysis
 import com.example.data.local.WaypointEntity
 import com.example.data.local.WaypointRepository
+import com.example.data.preferences.AiModelPreference
 import com.example.data.preferences.DepthUnit
 import com.example.data.preferences.DistanceUnit
 import com.example.data.preferences.FishingMode
@@ -17,6 +18,8 @@ import com.example.data.preferences.SonarSettings
 import com.example.data.map.MarineTileManager
 import com.example.data.marine.TideForecastData
 import com.example.data.marine.TideMarineRepository
+import com.example.data.weather.WeatherDashboardData
+import com.example.data.weather.WeatherRadarRepository
 import com.example.sensors.CompassSensorManager
 import com.example.sensors.CompassTelemetry
 import com.example.sensors.GpsTelemetry
@@ -52,6 +55,18 @@ sealed interface TideUiState {
     data class Error(val message: String) : TideUiState
 }
 
+sealed interface WeatherUiState {
+    data object Loading : WeatherUiState
+    data class Ready(val data: WeatherDashboardData) : WeatherUiState
+    data class Error(val message: String) : WeatherUiState
+}
+
+data class StormMapFocusRequest(
+    val id: Long,
+    val latitude: Double?,
+    val longitude: Double?
+)
+
 class SonarViewModel(
     private val waypointRepository: WaypointRepository,
     private val preferences: SonarPreferences,
@@ -59,7 +74,8 @@ class SonarViewModel(
     private val locationTracker: LocationTracker,
     private val compassSensorManager: CompassSensorManager,
     val tileManager: MarineTileManager,
-    private val tideRepository: TideMarineRepository
+    private val tideRepository: TideMarineRepository,
+    private val weatherRepository: WeatherRadarRepository
 ) : ViewModel() {
 
     val gpsTelemetry: StateFlow<GpsTelemetry> = locationTracker.telemetry
@@ -100,8 +116,15 @@ class SonarViewModel(
     private val _tideState = MutableStateFlow<TideUiState>(TideUiState.Loading)
     val tideState: StateFlow<TideUiState> = _tideState.asStateFlow()
 
+    private val _weatherState = MutableStateFlow<WeatherUiState>(WeatherUiState.Loading)
+    val weatherState: StateFlow<WeatherUiState> = _weatherState.asStateFlow()
+
+    private val _stormMapRequest = MutableStateFlow<StormMapFocusRequest?>(null)
+    val stormMapRequest: StateFlow<StormMapFocusRequest?> = _stormMapRequest.asStateFlow()
+
     init {
         refreshTideForecast()
+        refreshWeatherDashboard()
         // Record live GPS breadcrumb track when vessel moves more than 5 meters
         viewModelScope.launch {
             gpsTelemetry.collect { gps ->
@@ -142,6 +165,50 @@ class SonarViewModel(
         }
     }
 
+    fun refreshWeatherDashboard() {
+        viewModelScope.launch {
+            _weatherState.value = WeatherUiState.Loading
+            val gps = gpsTelemetry.value
+            try {
+                val result = weatherRepository.fetchWeatherDashboard(
+                    latitude = gps.latitude,
+                    longitude = gps.longitude
+                )
+                result.fold(
+                    onSuccess = { data ->
+                        _weatherState.value = WeatherUiState.Ready(data)
+                    },
+                    onFailure = { err ->
+                        _weatherState.value = WeatherUiState.Error(
+                            err.localizedMessage ?: "Gagal memuat prakiraan cuaca. Periksa koneksi internet."
+                        )
+                    }
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _weatherState.value = WeatherUiState.Error(
+                    e.localizedMessage ?: "Terjadi kesalahan saat memuat cuaca."
+                )
+            }
+        }
+    }
+
+    fun requestOpenStormRadarMap(latitude: Double? = null, longitude: Double? = null) {
+        _stormMapRequest.value = StormMapFocusRequest(
+            id = System.currentTimeMillis(),
+            latitude = latitude,
+            longitude = longitude
+        )
+        if (_weatherState.value !is WeatherUiState.Ready) {
+            refreshWeatherDashboard()
+        }
+    }
+
+    fun consumeStormMapRequest() {
+        _stormMapRequest.value = null
+    }
+
     fun startSensors() {
         locationTracker.startTracking()
         compassSensorManager.startListening()
@@ -178,7 +245,8 @@ class SonarViewModel(
                     longitude = gps.longitude,
                     accuracyMeters = gps.accuracyMeters,
                     liveTideContext = liveTideSummary,
-                    fishingMode = settings.value.fishingMode
+                    fishingMode = settings.value.fishingMode,
+                    preferredModel = settings.value.aiModelPreference
                 )
                 result.fold(
                     onSuccess = { prediction ->
@@ -275,7 +343,8 @@ class SonarViewModel(
                     bitmap = bitmap,
                     latitude = gps.latitude,
                     longitude = gps.longitude,
-                    fishingMode = settings.value.fishingMode
+                    fishingMode = settings.value.fishingMode,
+                    preferredModel = settings.value.aiModelPreference
                 )
                 result.fold(
                     onSuccess = { analysis ->
@@ -304,6 +373,7 @@ class SonarViewModel(
     fun setSonarRangeMeters(range: Int) = preferences.setSonarRangeMeters(range)
     fun setKeepScreenAwake(enabled: Boolean) = preferences.setKeepScreenAwake(enabled)
     fun setFishingMode(mode: FishingMode) = preferences.setFishingMode(mode)
+    fun setAiModelPreference(preference: AiModelPreference) = preferences.setAiModelPreference(preference)
 
     override fun onCleared() {
         super.onCleared()
@@ -317,7 +387,8 @@ class SonarViewModel(
         private val locationTracker: LocationTracker,
         private val compassSensorManager: CompassSensorManager,
         private val tileManager: MarineTileManager,
-        private val tideRepository: TideMarineRepository
+        private val tideRepository: TideMarineRepository,
+        private val weatherRepository: WeatherRadarRepository
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -329,7 +400,8 @@ class SonarViewModel(
                 locationTracker = locationTracker,
                 compassSensorManager = compassSensorManager,
                 tileManager = tileManager,
-                tideRepository = tideRepository
+                tideRepository = tideRepository,
+                weatherRepository = weatherRepository
             ) as T
         }
     }

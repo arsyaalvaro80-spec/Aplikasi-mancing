@@ -71,6 +71,7 @@ fun WaypointScreen(
     onSelectWaypoint: (Long) -> Unit,
     onDeleteWaypoint: (Long) -> Unit,
     onOpenChartplotter: () -> Unit,
+    onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
@@ -105,7 +106,8 @@ fun WaypointScreen(
                 title = stringResource(R.string.waypoints_title),
                 subtitle = stringResource(R.string.waypoints_subtitle),
                 statusText = if (compassTelemetry.hasSensor) "KOMPAS AKTIF" else "NO SENSOR",
-                statusActive = compassTelemetry.hasSensor
+                statusActive = compassTelemetry.hasSensor,
+                onOpenSettings = onOpenSettings
             )
         }
 

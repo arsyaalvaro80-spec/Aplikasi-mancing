@@ -21,13 +21,22 @@ enum class FishingMode(val label: String, val shortLabel: String) {
     BOAT("Perahu / Laut Dalam", "Perahu / Laut")
 }
 
+enum class AiModelPreference(val label: String, val modelId: String?) {
+    AUTO("Otomatis (4 Model)", null),
+    FLASH_LITE_35("Gemini 3.5 Flash-Lite", "gemini-3.5-flash-lite"),
+    FLASH_LITE_31("Gemini 3.1 Flash-Lite", "gemini-3.1-flash-lite"),
+    FLASH_38("Gemini 3.8 Flash", "gemini-3.8-flash"),
+    FLASH_3_PREVIEW("Gemini 3 Flash Preview", "gemini-3-flash-preview")
+}
+
 data class SonarSettings(
     val geminiApiKey: String = "",
     val depthUnit: DepthUnit = DepthUnit.METERS,
     val distanceUnit: DistanceUnit = DistanceUnit.NAUTICAL_MILES,
     val sonarRangeMeters: Int = 60,
     val keepScreenAwake: Boolean = true,
-    val fishingMode: FishingMode = FishingMode.SHORE
+    val fishingMode: FishingMode = FishingMode.SHORE,
+    val aiModelPreference: AiModelPreference = AiModelPreference.AUTO
 )
 
 class SonarPreferences(context: Context) {
@@ -43,13 +52,15 @@ class SonarPreferences(context: Context) {
         val depthName = prefs.getString(KEY_DEPTH_UNIT, DepthUnit.METERS.name) ?: DepthUnit.METERS.name
         val distName = prefs.getString(KEY_DISTANCE_UNIT, DistanceUnit.NAUTICAL_MILES.name) ?: DistanceUnit.NAUTICAL_MILES.name
         val modeName = prefs.getString(KEY_FISHING_MODE, FishingMode.SHORE.name) ?: FishingMode.SHORE.name
+        val modelName = prefs.getString(KEY_AI_MODEL_PREFERENCE, AiModelPreference.AUTO.name) ?: AiModelPreference.AUTO.name
         return SonarSettings(
             geminiApiKey = prefs.getString(KEY_GEMINI_API_KEY, "") ?: "",
             depthUnit = runCatching { DepthUnit.valueOf(depthName) }.getOrDefault(DepthUnit.METERS),
             distanceUnit = runCatching { DistanceUnit.valueOf(distName) }.getOrDefault(DistanceUnit.NAUTICAL_MILES),
             sonarRangeMeters = prefs.getInt(KEY_SONAR_RANGE, 60).coerceIn(30, 120),
             keepScreenAwake = prefs.getBoolean(KEY_KEEP_SCREEN_AWAKE, true),
-            fishingMode = runCatching { FishingMode.valueOf(modeName) }.getOrDefault(FishingMode.SHORE)
+            fishingMode = runCatching { FishingMode.valueOf(modeName) }.getOrDefault(FishingMode.SHORE),
+            aiModelPreference = runCatching { AiModelPreference.valueOf(modelName) }.getOrDefault(AiModelPreference.AUTO)
         )
     }
 
@@ -90,6 +101,11 @@ class SonarPreferences(context: Context) {
         _settings.value = _settings.value.copy(fishingMode = mode)
     }
 
+    fun setAiModelPreference(preference: AiModelPreference) {
+        prefs.edit().putString(KEY_AI_MODEL_PREFERENCE, preference.name).apply()
+        _settings.value = _settings.value.copy(aiModelPreference = preference)
+    }
+
     companion object {
         private const val PREFS_NAME = "bintan_sonar_preferences"
         private const val KEY_GEMINI_API_KEY = "gemini_api_key"
@@ -98,5 +114,6 @@ class SonarPreferences(context: Context) {
         private const val KEY_SONAR_RANGE = "sonar_range_meters"
         private const val KEY_KEEP_SCREEN_AWAKE = "keep_screen_awake"
         private const val KEY_FISHING_MODE = "fishing_mode"
+        private const val KEY_AI_MODEL_PREFERENCE = "ai_model_preference"
     }
 }
