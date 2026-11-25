@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.GpsNotFixed
 import androidx.compose.material.icons.rounded.NightsStay
 import androidx.compose.material.icons.rounded.Phishing
 import androidx.compose.material.icons.rounded.Radar
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Water
 import androidx.compose.material.icons.rounded.WbCloudy
@@ -286,24 +287,55 @@ fun RadarPredictionScreen(
                 }
 
                 is MarineScanUiState.Error -> {
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = "Gagal Memindai Kondisi Laut",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = scanState.message,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    text = "Gagal Memindai Kondisi Laut",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = scanState.message,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Button(
+                                    onClick = onScanMarine,
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp)
+                                        .testTag("retry_scan_marine_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Refresh,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "COBA PINDAI LAGI",
+                                        style = MaterialTheme.typography.labelLarge
+                                    )
+                                }
+                            }
                         }
+
+                        BintanQuickBaitGuideCard(
+                            tideTrend = currentTideTrend,
+                            fishingMode = settings.fishingMode
+                        )
                     }
                 }
 

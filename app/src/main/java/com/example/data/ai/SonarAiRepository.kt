@@ -4,22 +4,29 @@ import android.graphics.Bitmap
 import android.util.Log
 import com.example.data.preferences.FishingMode
 import com.google.firebase.Firebase
+import com.google.firebase.ai.GenerativeModel
 import com.google.firebase.ai.ai
+import com.google.firebase.ai.type.GenerateContentResponse
 import com.google.firebase.ai.type.Schema
 import com.google.firebase.ai.type.content
 import com.google.firebase.ai.type.generationConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
+import java.net.UnknownHostException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
 private const val TAG = "FirebaseSonarAI"
-private const val GEMINI_MODEL_NAME = "gemini-3.8-flash"
-private const val AI_TIMEOUT_MS = 60_000L
+// Ultra-fast high-volume Gemini 3 workhorse model as primary to avoid peak-hour 503 demand spikes
+private const val GEMINI_PRIMARY_MODEL_NAME = "gemini-3.5-flash-lite"
+private const val GEMINI_FALLBACK_MODEL_NAME = "gemini-3.8-flash"
+private const val PER_ATTEMPT_TIMEOUT_MS = 35_000L
+private const val RETRY_DELAY_MS = 1_500L
 
 data class MarinePrediction(
     val feedingScore: Int,
@@ -66,8 +73,9 @@ interface SonarAiRepository {
 }
 
 /**
- * Live Gemini implementation powered by Firebase AI Logic (gemini-3.8-flash) with App Check.
- * Uses strict structured JSON output via Schema.obj and 60s coroutine timeouts.
+ * Live Gemini implementation powered by Firebase AI Logic with App Check.
+ * Uses gemini-3.5-flash-lite as high-availability primary with automatic failover to gemini-3.8-flash,
+ * strict structured JSON output via Schema.obj, and per-attempt coroutine timeouts.
  */
 class FirebaseSonarAiRepository : SonarAiRepository {
 
@@ -134,7 +142,17 @@ class FirebaseSonarAiRepository : SonarAiRepository {
     // Lazy initialization per Firebase AI Logic contract (never evaluate eagerly at construction time)
     private val marinePredictionModel by lazy {
         Firebase.ai.generativeModel(
-            modelName = GEMINI_MODEL_NAME,
+            modelName = GEMINI_PRIMARY_MODEL_NAME,
+            generationConfig = generationConfig {
+                responseMimeType = "application/json"
+                responseSchema = marinePredictionSchema
+            }
+        )
+    }
+
+    private val marinePredictionFallbackModel by lazy {
+        Firebase.ai.generativeModel(
+            modelName = GEMINI_FALLBACK_MODEL_NAME,
             generationConfig = generationConfig {
                 responseMimeType = "application/json"
                 responseSchema = marinePredictionSchema
@@ -144,12 +162,129 @@ class FirebaseSonarAiRepository : SonarAiRepository {
 
     private val sonarVisionModel by lazy {
         Firebase.ai.generativeModel(
-            modelName = GEMINI_MODEL_NAME,
+            modelName = GEMINI_PRIMARY_MODEL_NAME,
             generationConfig = generationConfig {
                 responseMimeType = "application/json"
                 responseSchema = sonarVisionSchema
             }
         )
+    }
+
+    private val sonarVisionFallbackModel by lazy {
+        Firebase.ai.generativeModel(
+            modelName = GEMINI_FALLBACK_MODEL_NAME,
+            generationConfig = generationConfig {
+                responseMimeType = "application/json"
+                responseSchema = sonarVisionSchema
+            }
+        )
+    }
+
+    private fun collectErrorMessage(error: Throwable): String {
+        val parts = mutableListOf<String>()
+        var current: Throwable? = error
+        var depth = 0
+        while (current != null && depth < 4) {
+            current.localizedMessage?.takeIf(String::isNotBlank)?.let(parts::add)
+            current.message?.takeIf(String::isNotBlank)?.let(parts::add)
+            current = current.cause
+            depth++
+        }
+        return parts.distinct().joinToString(" | ")
+    }
+
+    private fun isNonRetryableLocalOrAuthError(error: Throwable): Boolean {
+        if (error is UnknownHostException) return true
+        val fullMsg = collectErrorMessage(error)
+        return fullMsg.contains("Default FirebaseApp is not initialized", ignoreCase = true) ||
+            fullMsg.contains("App Check", ignoreCase = true) ||
+            fullMsg.contains("PERMISSION_DENIED", ignoreCase = true) ||
+            fullMsg.contains("403", ignoreCase = true) ||
+            fullMsg.contains("Unable to resolve host", ignoreCase = true) ||
+            fullMsg.contains("Network is unreachable", ignoreCase = true)
+    }
+
+    private fun isTransientServerOrBusyError(error: Throwable): Boolean {
+        if (error is TimeoutCancellationException) return true
+        val fullMsg = collectErrorMessage(error)
+        return fullMsg.contains("high demand", ignoreCase = true) ||
+            fullMsg.contains("overloaded", ignoreCase = true) ||
+            fullMsg.contains("503", ignoreCase = true) ||
+            fullMsg.contains("429", ignoreCase = true) ||
+            fullMsg.contains("UNAVAILABLE", ignoreCase = true) ||
+            fullMsg.contains("RESOURCE_EXHAUSTED", ignoreCase = true) ||
+            fullMsg.contains("try again", ignoreCase = true) ||
+            fullMsg.contains("DEADLINE_EXCEEDED", ignoreCase = true) ||
+            fullMsg.contains("temporarily", ignoreCase = true)
+    }
+
+    private suspend fun executeWithResilience(
+        primary: GenerativeModel,
+        fallback: GenerativeModel,
+        call: suspend (GenerativeModel) -> GenerateContentResponse
+    ): GenerateContentResponse {
+        // Attempt 1: Primary high-availability model (gemini-3.5-flash-lite)
+        val firstError = try {
+            return withTimeout(PER_ATTEMPT_TIMEOUT_MS) { call(primary) }
+        } catch (e: TimeoutCancellationException) {
+            Log.w(TAG, "Primary model ($GEMINI_PRIMARY_MODEL_NAME) timed out; trying fallback $GEMINI_FALLBACK_MODEL_NAME", e)
+            e
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (isNonRetryableLocalOrAuthError(e)) throw e
+            Log.w(TAG, "Primary model ($GEMINI_PRIMARY_MODEL_NAME) failed; trying fallback $GEMINI_FALLBACK_MODEL_NAME", e)
+            e
+        }
+
+        // Attempt 2: Fallback model (gemini-3.8-flash)
+        val secondError = try {
+            return withTimeout(PER_ATTEMPT_TIMEOUT_MS) { call(fallback) }
+        } catch (e: TimeoutCancellationException) {
+            Log.w(TAG, "Fallback model ($GEMINI_FALLBACK_MODEL_NAME) timed out", e)
+            e
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (isNonRetryableLocalOrAuthError(e)) throw e
+            Log.w(TAG, "Fallback model ($GEMINI_FALLBACK_MODEL_NAME) failed", e)
+            e
+        }
+
+        // Attempt 3: Brief backoff retry on primary if both attempts hit transient load/timeout
+        if (isTransientServerOrBusyError(firstError) || isTransientServerOrBusyError(secondError)) {
+            delay(RETRY_DELAY_MS)
+            return withTimeout(PER_ATTEMPT_TIMEOUT_MS) { call(primary) }
+        }
+
+        throw secondError
+    }
+
+    private fun toFriendlyFailure(error: Throwable): IllegalStateException {
+        val rawDetail = error.localizedMessage?.takeIf(String::isNotBlank)
+            ?: error.message?.takeIf(String::isNotBlank)
+            ?: error.javaClass.simpleName
+        val fullMsg = collectErrorMessage(error)
+
+        val friendlyText = when {
+            fullMsg.contains("Default FirebaseApp is not initialized", ignoreCase = true) ->
+                "Konfigurasi Firebase (app/google-services.json) belum ikut terbawa saat build APK. " +
+                    "Pastikan Secret GOOGLE_SERVICES_JSON aktif di GitHub lalu build ulang APK."
+            fullMsg.contains("App Check", ignoreCase = true) ||
+                fullMsg.contains("403", ignoreCase = true) ||
+                fullMsg.contains("PERMISSION_DENIED", ignoreCase = true) ->
+                "Akses Firebase AI ditolak (App Check / Izin). Pastikan App Check untuk Firebase AI Logic di Firebase Console berstatus Unenforced. ($rawDetail)"
+            error is UnknownHostException ||
+                fullMsg.contains("Unable to resolve host", ignoreCase = true) ||
+                fullMsg.contains("Network is unreachable", ignoreCase = true) ->
+                "Tidak ada koneksi internet. Periksa sinyal seluler atau WiFi Anda lalu tekan Coba Pindai Lagi."
+            error is TimeoutCancellationException ->
+                "Koneksi ke server Gemini AI melewati batas waktu. Periksa sinyal internet lalu tekan Coba Pindai Lagi."
+            isTransientServerOrBusyError(error) ->
+                "Server Gemini AI sedang padat sementara. Tunggu beberapa detik lalu tekan Coba Pindai Lagi. ($rawDetail)"
+            else -> rawDetail
+        }
+        return IllegalStateException(friendlyText, error)
     }
 
     override suspend fun analyzeMarineConditions(
@@ -196,11 +331,14 @@ class FirebaseSonarAiRepository : SonarAiRepository {
                 """.trimIndent()
             }
 
-            val response = withTimeout(AI_TIMEOUT_MS) {
-                marinePredictionModel.generateContent(prompt)
+            val response = executeWithResilience(
+                primary = marinePredictionModel,
+                fallback = marinePredictionFallbackModel
+            ) { model ->
+                model.generateContent(prompt)
             }
 
-            val rawJson = response.text
+            val rawJson = response.text?.trim()
                 ?: return Result.failure(IllegalStateException("Gemini mengembalikan respons kosong."))
 
             val json = JSONObject(rawJson)
@@ -237,23 +375,12 @@ class FirebaseSonarAiRepository : SonarAiRepository {
             )
         } catch (e: TimeoutCancellationException) {
             Log.e(TAG, "Marine condition analysis timed out", e)
-            Result.failure(
-                IllegalStateException("Analisis Gemini melewati batas waktu 60 detik. Periksa sinyal internet dan coba lagi.")
-            )
+            Result.failure(toFriendlyFailure(e))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Firebase AI marine analysis failed", e)
-            val msg = e.localizedMessage.orEmpty()
-            val friendly = if (msg.contains("Default FirebaseApp is not initialized", ignoreCase = true)) {
-                IllegalStateException(
-                    "Konfigurasi Firebase (app/google-services.json) belum ikut terbawa saat build APK di GitHub. " +
-                        "Tambahkan file google-services.json (atau Secret GOOGLE_SERVICES_JSON) di repo GitHub lalu build ulang APK."
-                )
-            } else {
-                e
-            }
-            Result.failure(friendly)
+            Result.failure(toFriendlyFailure(e))
         }
     }
 
@@ -292,16 +419,18 @@ class FirebaseSonarAiRepository : SonarAiRepository {
                 6. Rekomendasi umpan, bobot timah/jig ringan, dan teknik mancing paling cocok.
             """.trimIndent()
 
-            val response = withTimeout(AI_TIMEOUT_MS) {
-                sonarVisionModel.generateContent(
-                    content {
-                        image(safeBitmap)
-                        text(prompt)
-                    }
-                )
+            val imageRequest = content {
+                image(safeBitmap)
+                text(prompt)
+            }
+            val response = executeWithResilience(
+                primary = sonarVisionModel,
+                fallback = sonarVisionFallbackModel
+            ) { model ->
+                model.generateContent(imageRequest)
             }
 
-            val rawJson = response.text
+            val rawJson = response.text?.trim()
                 ?: return Result.failure(IllegalStateException("Gemini Vision mengembalikan respons kosong."))
 
             val json = JSONObject(rawJson)
@@ -320,23 +449,12 @@ class FirebaseSonarAiRepository : SonarAiRepository {
             )
         } catch (e: TimeoutCancellationException) {
             Log.e(TAG, "Sonar vision analysis timed out", e)
-            Result.failure(
-                IllegalStateException("Analisis Gemini Vision melewati batas waktu 60 detik. Periksa sinyal internet dan coba lagi.")
-            )
+            Result.failure(toFriendlyFailure(e))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Firebase AI sonar vision analysis failed", e)
-            val msg = e.localizedMessage.orEmpty()
-            val friendly = if (msg.contains("Default FirebaseApp is not initialized", ignoreCase = true)) {
-                IllegalStateException(
-                    "Konfigurasi Firebase (app/google-services.json) belum ikut terbawa saat build APK di GitHub. " +
-                        "Tambahkan file google-services.json (atau Secret GOOGLE_SERVICES_JSON) di repo GitHub lalu build ulang APK."
-                )
-            } else {
-                e
-            }
-            Result.failure(friendly)
+            Result.failure(toFriendlyFailure(e))
         }
     }
 
