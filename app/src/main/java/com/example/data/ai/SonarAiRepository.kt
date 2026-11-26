@@ -291,7 +291,7 @@ class FirebaseSonarAiRepository : SonarAiRepository {
             fullMsg.contains("App Check", ignoreCase = true) ||
                 fullMsg.contains("403", ignoreCase = true) ||
                 fullMsg.contains("PERMISSION_DENIED", ignoreCase = true) ->
-                "Akses Firebase AI ditolak (App Check / Izin). Pastikan App Check untuk Firebase AI Logic di Firebase Console berstatus Unenforced. ($rawDetail)"
+                "Verifikasi keamanan Firebase App Check gagal. Pastikan internet stabil & Google Play Services aktif, lalu tutup-buka aplikasi dan tekan Coba Pindai Lagi. ($rawDetail)"
             error is UnknownHostException ||
                 fullMsg.contains("Unable to resolve host", ignoreCase = true) ||
                 fullMsg.contains("Network is unreachable", ignoreCase = true) ->
