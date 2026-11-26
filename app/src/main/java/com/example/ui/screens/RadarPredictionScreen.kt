@@ -63,6 +63,7 @@ import com.example.sensors.MarineGeoUtils
 import com.example.ui.components.AiSampleNoticeBanner
 import com.example.ui.components.FeedingScoreGauge
 import com.example.ui.components.MarineScreenHeader
+import com.example.ui.components.SolunarCalendarCard
 import com.example.ui.components.SonarRadarCanvas
 import com.example.ui.components.TelemetryTile
 import com.example.ui.components.TideWaveChartCard
@@ -100,7 +101,7 @@ fun RadarPredictionScreen(
 
     LaunchedEffect(scanState) {
         if (scanState is MarineScanUiState.Success) {
-            listState.animateScrollToItem(index = 6)
+            listState.animateScrollToItem(index = 7)
         }
     }
 
@@ -156,6 +157,11 @@ fun RadarPredictionScreen(
                 tideState = tideState,
                 onRefreshTide = onRefreshTide
             )
+        }
+
+        // 7-Day Solunar, Moon Phase & Spring/Neap Tide Calendar Card
+        item {
+            SolunarCalendarCard(tideState = tideState)
         }
 
         // Fishing Mode Selector (Mancing Pinggir vs Perahu / Laut)

@@ -35,7 +35,7 @@ class MainActivity : ComponentActivity() {
             locationTracker = LocationTracker(appContext),
             compassSensorManager = CompassSensorManager(appContext),
             tileManager = MarineTileManager(appContext),
-            tideRepository = TideMarineRepository(),
+            tideRepository = TideMarineRepository(appContext),
             weatherRepository = WeatherRadarRepository()
         )
     }

@@ -125,6 +125,9 @@ class SonarViewModel(
     private val _stormMapRequest = MutableStateFlow<StormMapFocusRequest?>(null)
     val stormMapRequest: StateFlow<StormMapFocusRequest?> = _stormMapRequest.asStateFlow()
 
+    private var lastTideFetchCoords: LatLon? = null
+    private var lastWeatherFetchCoords: LatLon? = null
+
     init {
         MarineAlertManager.ensureChannels(appContext)
         val currentSettings = preferences.settings.value
@@ -137,11 +140,34 @@ class SonarViewModel(
         }
         refreshTideForecast()
         refreshWeatherDashboard()
-        // Record live GPS breadcrumb track when vessel moves more than 5 meters
+        // Record live GPS breadcrumb track & auto-sync tide/weather when GPS locks onto real location
         viewModelScope.launch {
             gpsTelemetry.collect { gps ->
                 if (!gps.isLiveFix) return@collect
                 preferences.saveLastKnownLocation(gps.latitude, gps.longitude)
+
+                val prevTide = lastTideFetchCoords
+                if (prevTide == null || MarineGeoUtils.distanceMeters(
+                        prevTide.latitude,
+                        prevTide.longitude,
+                        gps.latitude,
+                        gps.longitude
+                    ) >= 2_000.0
+                ) {
+                    refreshTideForecast(silent = _tideState.value is TideUiState.Ready)
+                }
+
+                val prevWeather = lastWeatherFetchCoords
+                if (prevWeather == null || MarineGeoUtils.distanceMeters(
+                        prevWeather.latitude,
+                        prevWeather.longitude,
+                        gps.latitude,
+                        gps.longitude
+                    ) >= 3_000.0
+                ) {
+                    refreshWeatherDashboard(silent = _weatherState.value is WeatherUiState.Ready)
+                }
+
                 val current = _vesselTrack.value
                 val last = current.lastOrNull()
                 val shouldAppend = last == null || MarineGeoUtils.distanceMeters(
@@ -158,10 +184,13 @@ class SonarViewModel(
         }
     }
 
-    fun refreshTideForecast() {
+    fun refreshTideForecast(silent: Boolean = false) {
         viewModelScope.launch {
-            _tideState.value = TideUiState.Loading
+            if (!silent) {
+                _tideState.value = TideUiState.Loading
+            }
             val gps = gpsTelemetry.value
+            lastTideFetchCoords = LatLon(gps.latitude, gps.longitude)
             try {
                 val data = tideRepository.fetchTideForecast(
                     latitude = gps.latitude,
@@ -171,17 +200,22 @@ class SonarViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _tideState.value = TideUiState.Error(
-                    e.localizedMessage ?: "Gagal memuat data pasang surut."
-                )
+                if (!silent || _tideState.value !is TideUiState.Ready) {
+                    _tideState.value = TideUiState.Error(
+                        e.localizedMessage ?: "Gagal memuat data pasang surut."
+                    )
+                }
             }
         }
     }
 
-    fun refreshWeatherDashboard() {
+    fun refreshWeatherDashboard(silent: Boolean = false) {
         viewModelScope.launch {
-            _weatherState.value = WeatherUiState.Loading
+            if (!silent) {
+                _weatherState.value = WeatherUiState.Loading
+            }
             val gps = gpsTelemetry.value
+            lastWeatherFetchCoords = LatLon(gps.latitude, gps.longitude)
             try {
                 val result = weatherRepository.fetchWeatherDashboard(
                     latitude = gps.latitude,
@@ -192,17 +226,21 @@ class SonarViewModel(
                         _weatherState.value = WeatherUiState.Ready(data)
                     },
                     onFailure = { err ->
-                        _weatherState.value = WeatherUiState.Error(
-                            err.localizedMessage ?: "Gagal memuat prakiraan cuaca. Periksa koneksi internet."
-                        )
+                        if (!silent || _weatherState.value !is WeatherUiState.Ready) {
+                            _weatherState.value = WeatherUiState.Error(
+                                err.localizedMessage ?: "Gagal memuat prakiraan cuaca. Periksa koneksi internet."
+                            )
+                        }
                     }
                 )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _weatherState.value = WeatherUiState.Error(
-                    e.localizedMessage ?: "Terjadi kesalahan saat memuat cuaca."
-                )
+                if (!silent || _weatherState.value !is WeatherUiState.Ready) {
+                    _weatherState.value = WeatherUiState.Error(
+                        e.localizedMessage ?: "Terjadi kesalahan saat memuat cuaca."
+                    )
+                }
             }
         }
     }

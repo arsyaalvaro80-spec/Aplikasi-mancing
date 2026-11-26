@@ -31,7 +31,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -54,8 +56,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.marine.TideForecastData
+import com.example.data.marine.TideMarineRepository
 import com.example.data.marine.TideTrend
 import com.example.viewmodel.TideUiState
+import kotlinx.coroutines.delay
+import java.util.Calendar
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -136,6 +141,24 @@ private fun TideForecastContent(
     onRefreshTide: () -> Unit
 ) {
     var inspectedHour by remember(data) { mutableStateOf<Int?>(null) }
+    var liveHourFraction by remember(data) { mutableFloatStateOf(data.currentHourFraction) }
+
+    // Advance current-time cursor & interpolated sea level live every 60 seconds
+    LaunchedEffect(data) {
+        while (true) {
+            delay(60_000L)
+            val now = Calendar.getInstance()
+            liveHourFraction = (now.get(Calendar.HOUR_OF_DAY) + now.get(Calendar.MINUTE) / 60f)
+                .coerceIn(0f, 23.98f)
+        }
+    }
+
+    val liveSample = remember(data.hourlyPoints, liveHourFraction) {
+        TideMarineRepository.interpolateAtHour(data.hourlyPoints, liveHourFraction)
+    }
+    val liveHourPt = data.hourlyPoints.getOrNull(
+        liveHourFraction.toInt().coerceIn(0, (data.hourlyPoints.lastIndex).coerceAtLeast(0))
+    )
 
     val primaryColor = MaterialTheme.colorScheme.primary
     val secondaryColor = MaterialTheme.colorScheme.secondary
@@ -144,11 +167,12 @@ private fun TideForecastContent(
     val textPrimary = MaterialTheme.colorScheme.onSurface
     val textSecondary = MaterialTheme.colorScheme.onSurfaceVariant
 
-    val trendColor = when (data.currentTrend) {
+    val activeTrend = liveSample.trend
+    val trendColor = when (activeTrend) {
         TideTrend.RISING, TideTrend.HIGH_SLACK -> primaryColor
         TideTrend.FALLING, TideTrend.LOW_SLACK -> tertiaryColor
     }
-    val trendContainer = when (data.currentTrend) {
+    val trendContainer = when (activeTrend) {
         TideTrend.RISING, TideTrend.HIGH_SLACK -> MaterialTheme.colorScheme.primaryContainer
         TideTrend.FALLING, TideTrend.LOW_SLACK -> MaterialTheme.colorScheme.tertiaryContainer
     }
@@ -157,11 +181,12 @@ private fun TideForecastContent(
         data.hourlyPoints.getOrNull(hr.coerceIn(0, data.hourlyPoints.lastIndex))
     }
 
-    val displayHeight = activePoint?.seaLevelMeters ?: data.currentHeightMeters
-    val displayWave = activePoint?.waveHeightMeters ?: data.currentWaveMeters
-    val displayCurrentKn = activePoint?.currentKnots ?: data.currentSpeedKnots
-    val displayTemp = activePoint?.seaTempCelsius ?: data.seaTempCelsius
-    val displayTimeLabel = activePoint?.let { "JAM ${it.label} (GESER)" } ?: "SAAT INI"
+    val displayHeight = activePoint?.seaLevelMeters ?: liveSample.heightMeters
+    val displayWave = activePoint?.waveHeightMeters ?: (liveHourPt?.waveHeightMeters ?: data.currentWaveMeters)
+    val displayCurrentKn = activePoint?.currentKnots ?: (liveHourPt?.currentKnots ?: data.currentSpeedKnots)
+    val displayTemp = activePoint?.seaTempCelsius ?: (liveHourPt?.seaTempCelsius ?: data.seaTempCelsius)
+    val displayTimeLabel = activePoint?.let { "JAM ${it.label} (GESER)" }
+        ?: "SEKARANG ${TideMarineRepository.formatHourFraction(liveHourFraction)}"
 
     Column(
         modifier = Modifier
@@ -190,8 +215,15 @@ private fun TideForecastContent(
                         color = textPrimary
                     )
                 }
+                val sourceLine = buildString {
+                    append(data.sourceLabel)
+                    if (data.fetchedAtLabel.isNotBlank()) {
+                        append(" • ")
+                        append(data.fetchedAtLabel)
+                    }
+                }
                 Text(
-                    text = data.sourceLabel,
+                    text = sourceLine,
                     style = MaterialTheme.typography.labelSmall,
                     color = if (data.isLiveApiData) primaryColor else tertiaryColor
                 )
@@ -207,7 +239,7 @@ private fun TideForecastContent(
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Icon(
-                        imageVector = if (data.currentTrend == TideTrend.RISING || data.currentTrend == TideTrend.HIGH_SLACK) {
+                        imageVector = if (activeTrend == TideTrend.RISING || activeTrend == TideTrend.HIGH_SLACK) {
                             Icons.Rounded.ArrowUpward
                         } else {
                             Icons.Rounded.ArrowDownward
@@ -218,7 +250,7 @@ private fun TideForecastContent(
                     )
                     Spacer(modifier = Modifier.width(3.dp))
                     Text(
-                        text = data.currentTrend.label,
+                        text = activeTrend.label,
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                         color = trendColor
                     )
@@ -437,9 +469,9 @@ private fun TideForecastContent(
                     style = Stroke(width = 2.6.dp.toPx(), cap = StrokeCap.Round)
                 )
 
-                // Plot High Tide (PASANG) and Low Tide (SURUT) crests & valleys
+                // Plot High Tide (PASANG) and Low Tide (SURUT) crests & valleys at sub-hour precision
                 data.extremes.forEach { ev ->
-                    val ex = xForHour(ev.hourOfDay.toFloat())
+                    val ex = xForHour(ev.hourFraction.coerceIn(0f, 23f))
                     val ey = yForHeight(ev.heightMeters)
                     val dotColor = if (ev.isHighTide) primaryColor else tertiaryColor
                     drawCircle(color = dotColor.copy(alpha = 0.25f), radius = 8.dp.toPx(), center = Offset(ex, ey))
@@ -457,8 +489,8 @@ private fun TideForecastContent(
                 }
 
                 // Current Time ("SEKARANG") vertical cursor & pulsing dot
-                val nowX = xForHour(data.currentHourFraction)
-                val nowY = yForHeight(data.currentHeightMeters)
+                val nowX = xForHour(liveHourFraction.coerceIn(0f, 23f))
+                val nowY = yForHeight(liveSample.heightMeters)
                 drawLine(
                     color = primaryColor.copy(alpha = 0.85f),
                     start = Offset(nowX, topPad),
@@ -528,18 +560,27 @@ private fun TideForecastContent(
             }
         }
 
-        // Footer hint
-        val rateText = String.format(Locale.US, "%+.0f cm/jam", data.rateCmPerHour)
-        val flowNote = if (abs(data.rateCmPerHour) >= 12.0) {
+        // Footer hint + Datum transparency note
+        val rateText = String.format(Locale.US, "%+.0f cm/jam", liveSample.rateCmPerHour)
+        val flowNote = if (abs(liveSample.rateCmPerHour) >= 12.0) {
             "Arus pasang-surut aktif ($rateText) — waktu ideal ikan mencari makan."
         } else {
             "Arus melandai ($rateText) — geser grafik untuk melihat jam puncak pasang/surut."
         }
-        Text(
-            text = flowNote,
-            style = MaterialTheme.typography.bodySmall,
-            color = textSecondary
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = flowNote,
+                style = MaterialTheme.typography.bodySmall,
+                color = textSecondary
+            )
+            if (data.datumNote.isNotBlank()) {
+                Text(
+                    text = "${data.datumNote} • ${data.coordinatesLabel}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = textSecondary.copy(alpha = 0.85f)
+                )
+            }
+        }
     }
 }
 

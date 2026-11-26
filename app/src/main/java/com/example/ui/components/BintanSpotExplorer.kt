@@ -3,6 +3,7 @@ package com.example.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -218,9 +220,10 @@ private fun HotspotInfoLine(
 }
 
 private enum class SpotFilterTab(val label: String) {
-    ALL("Semua (16)"),
-    SHORE("Pinggir (10)"),
-    BOAT("Perahu (6)")
+    ALL("Semua (24)"),
+    SHORE("Pinggir"),
+    BOAT("Perahu"),
+    KEPRI_OTHER("Luar Bintan")
 }
 
 @Composable
@@ -242,6 +245,7 @@ fun BintanSpotAtlasDialog(
                 SpotFilterTab.ALL -> true
                 SpotFilterTab.SHORE -> spot.accessType == SpotAccessType.SHORE
                 SpotFilterTab.BOAT -> spot.accessType == SpotAccessType.BOAT
+                SpotFilterTab.KEPRI_OTHER -> !spot.isBintanCore
             }
         }
     }
@@ -256,17 +260,17 @@ fun BintanSpotAtlasDialog(
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Phishing,
-                    contentDescription = "Daftar Spot Gacor Bintan",
+                    contentDescription = "Daftar Spot Gacor Bintan dan Kepri",
                     tint = MaterialTheme.colorScheme.primary
                 )
                 Column {
                     Text(
-                        text = "Spot Gacor & Karang Bintan",
+                        text = "Spot Gacor & Karang Kepri",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Ketuk spot untuk langsung zoom ke karangnya di peta",
+                        text = "Bintan, Batam, Karimun, Lingga, Anambas & Natuna",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -276,7 +280,9 @@ fun BintanSpotAtlasDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     SpotFilterTab.entries.forEach { tab ->

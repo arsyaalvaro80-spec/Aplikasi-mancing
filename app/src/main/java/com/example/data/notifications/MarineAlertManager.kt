@@ -150,7 +150,7 @@ object MarineAlertManager {
         val contentIntent = PendingIntent.getActivity(context, notificationId, launchIntent, pendingFlags)
 
         val builder = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification_sonar)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
@@ -158,9 +158,18 @@ object MarineAlertManager {
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
 
-        runCatching {
+        val canNotify = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        if (!canNotify) return
+
+        try {
             NotificationManagerCompat.from(context).notify(notificationId, builder.build())
-        }.onFailure { err ->
+        } catch (se: SecurityException) {
+            Log.w(TAG, "Missing notification permission at notify time", se)
+        } catch (err: Exception) {
             Log.e(TAG, "Failed to post notification", err)
         }
     }
@@ -230,9 +239,9 @@ class MarineAlertJobService : JobService() {
 
                 // 2. Check active rising tide (Pasang Naik / Jam Gacor window)
                 if (settings.tideAlertsEnabled && (nowMs - prefs.getLastTideNotifiedMs()) >= TIDE_COOLDOWN_MS) {
-                    val tideRepo = TideMarineRepository()
+                    val tideRepo = TideMarineRepository(appContext)
                     val tide = tideRepo.fetchTideForecast(lat, lon)
-                    val nextHigh = tide.extremes.firstOrNull { it.isHighTide && it.hourOfDay >= tide.currentHourFraction }
+                    val nextHigh = tide.extremes.firstOrNull { it.isHighTide && it.hourFraction >= tide.currentHourFraction }
                     val isPrimeRising = tide.currentTrend == TideTrend.RISING && tide.rateCmPerHour >= 8.0
 
                     if (isPrimeRising) {

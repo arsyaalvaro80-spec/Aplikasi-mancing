@@ -44,6 +44,7 @@ import androidx.compose.material.icons.rounded.Phishing
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Sailing
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Thunderstorm
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -86,6 +87,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -97,6 +99,7 @@ import com.example.data.map.BintanReefAtlas
 import com.example.data.map.ChartBaseLayer
 import com.example.data.map.MarineTileManager
 import com.example.data.map.OfflineMapState
+import com.example.data.map.SearchedLocation
 import com.example.data.map.SpotAccessType
 import com.example.data.preferences.DepthUnit
 import com.example.data.preferences.FishingMode
@@ -108,6 +111,7 @@ import com.example.sensors.LatLon
 import com.example.sensors.MarineGeoUtils
 import com.example.sensors.WebMercator
 import com.example.ui.components.BintanSpotAtlasDialog
+import com.example.ui.components.MapLocationSearchDialog
 import com.example.ui.components.SelectedHotspotDetailCard
 import com.example.ui.components.reefColorFor
 import com.example.viewmodel.StormMapFocusRequest
@@ -158,6 +162,8 @@ fun ChartplotterScreen(
     var showReefHotspots by remember { mutableStateOf(true) }
     var selectedHotspot by remember { mutableStateOf<BintanHotspot?>(null) }
     var showSpotAtlasDialog by remember { mutableStateOf(false) }
+    var showSearchDialog by remember { mutableStateOf(false) }
+    var searchedPin by remember { mutableStateOf<SearchedLocation?>(null) }
     var showOfflineDialog by remember { mutableStateOf(false) }
     var selectedRadarFrameIdx by remember { mutableStateOf(-1) }
     var followVessel by remember { mutableStateOf(true) }
@@ -200,11 +206,18 @@ fun ChartplotterScreen(
         onConsumeStormMapRequest()
     }
 
+    var previousShoreMode by remember { mutableStateOf(isShoreMode) }
     LaunchedEffect(isShoreMode) {
-        if (isShoreMode && !showStormRadar) {
-            activeLayer = ChartBaseLayer.SATELLITE_REEF
-            showCastingRings = true
-            zoom = zoom.coerceAtMost(ChartBaseLayer.SATELLITE_REEF.maxZoom.toDouble())
+        if (isShoreMode != previousShoreMode) {
+            previousShoreMode = isShoreMode
+            if (isShoreMode && !showStormRadar) {
+                activeLayer = ChartBaseLayer.SATELLITE_REEF
+                showCastingRings = true
+                zoom = zoom.coerceAtMost(ChartBaseLayer.SATELLITE_REEF.maxZoom.toDouble())
+            } else if (!isShoreMode && !showStormRadar) {
+                activeLayer = ChartBaseLayer.MARINE_DARK
+                showCastingRings = false
+            }
         }
     }
 
@@ -730,6 +743,45 @@ fun ChartplotterScreen(
                 }
             }
 
+            // 2d. Active Searched Location Crosshair Marker
+            searchedPin?.let { pin ->
+                val (sx, sy) = WebMercator.latLonToScreen(
+                    targetLat = pin.latitude,
+                    targetLon = pin.longitude,
+                    centerLat = centerLat,
+                    centerLon = centerLon,
+                    zoom = zoom,
+                    baseTilePx = baseTilePx,
+                    viewportWidth = widthD,
+                    viewportHeight = heightD
+                )
+                if (sx in -80f..(size.width + 80f) && sy in -80f..(size.height + 80f)) {
+                    val pinOffset = Offset(sx, sy)
+                    drawCircle(
+                        color = secondaryColor.copy(alpha = 0.24f),
+                        radius = 22.dp.toPx(),
+                        center = pinOffset
+                    )
+                    drawCircle(
+                        color = secondaryColor,
+                        radius = 13.dp.toPx(),
+                        center = pinOffset,
+                        style = Stroke(width = 2.dp.toPx())
+                    )
+                    drawCircle(
+                        color = secondaryColor,
+                        radius = 4.dp.toPx(),
+                        center = pinOffset
+                    )
+                    drawContext.canvas.nativeCanvas.drawText(
+                        pin.name,
+                        sx + 15.dp.toPx(),
+                        sy - 6.dp.toPx(),
+                        routeBadgePaint
+                    )
+                }
+            }
+
             // 3. Vessel Breadcrumb Wake Track
             if (vesselTrack.size >= 2) {
                 val trackPath = Path()
@@ -957,6 +1009,30 @@ fun ChartplotterScreen(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                FilterChip(
+                    selected = showSearchDialog || searchedPin != null,
+                    onClick = { showSearchDialog = true },
+                    label = {
+                        Text(
+                            text = stringResource(R.string.map_search_location),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Rounded.Search,
+                            contentDescription = "Cari lokasi atau koordinat",
+                            modifier = Modifier.size(15.dp)
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = surfaceColor.copy(alpha = 0.90f),
+                        selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.95f),
+                        selectedLabelColor = secondaryColor,
+                        selectedLeadingIconColor = secondaryColor
+                    ),
+                    modifier = Modifier.testTag("map_search_chip")
+                )
                 LayerChip(
                     label = stringResource(R.string.map_layer_satellite),
                     selected = activeLayer == ChartBaseLayer.SATELLITE_REEF,
@@ -1460,12 +1536,69 @@ fun ChartplotterScreen(
                         )
                         IconButton(
                             onClick = { dropPinMode = false },
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(48.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Close,
                                 contentDescription = "Batalkan tandai spot",
                                 tint = primaryColor
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Active Searched Location Banner (Save or Dismiss)
+            val activeSearchPin = searchedPin
+            if (activeSearchPin != null && !dropPinMode) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.95f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.2.dp, secondaryColor, RoundedCornerShape(12.dp))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Pin: ${activeSearchPin.name}",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = secondaryColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = MarineGeoUtils.formatDecimalCoords(activeSearchPin.latitude, activeSearchPin.longitude),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = textPrimaryColor
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                pendingPinCoords = LatLon(activeSearchPin.latitude, activeSearchPin.longitude)
+                            },
+                            modifier = Modifier.testTag("searched_pin_save_button")
+                        ) {
+                            Text(
+                                text = "Simpan Spot",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = primaryColor
+                            )
+                        }
+                        IconButton(
+                            onClick = { searchedPin = null },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .testTag("searched_pin_dismiss_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = "Tutup pin lokasi pencarian",
+                                tint = secondaryColor
                             )
                         }
                     }
@@ -1504,10 +1637,18 @@ fun ChartplotterScreen(
                 active = followVessel,
                 onClick = {
                     followVessel = true
+                    searchedPin = null
                     centerLat = gpsTelemetry.latitude
                     centerLon = gpsTelemetry.longitude
                 },
                 testTag = "map_center_gps_button"
+            )
+            ChartControlButton(
+                icon = Icons.Rounded.Search,
+                contentDescription = stringResource(R.string.map_search_location),
+                active = showSearchDialog,
+                onClick = { showSearchDialog = true },
+                testTag = "map_search_button"
             )
             ChartControlButton(
                 icon = Icons.Rounded.Phishing,
@@ -1552,26 +1693,28 @@ fun ChartplotterScreen(
             val px = (scaleBarMeters / mpp).toFloat().coerceIn(40f, 320f)
             with(density) { px.toDp() }
         }
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(start = 14.dp, bottom = 92.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(surfaceColor.copy(alpha = 0.85f))
-                .padding(horizontal = 8.dp, vertical = 4.dp)
-        ) {
-            Text(
-                text = MarineGeoUtils.formatDistance(scaleBarMeters, settings.distanceUnit),
-                style = MaterialTheme.typography.labelSmall,
-                color = textPrimaryColor
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Box(
+        if (selectedHotspot == null) {
+            Column(
                 modifier = Modifier
-                    .width(scaleBarWidthDp)
-                    .height(3.dp)
-                    .background(primaryColor)
-            )
+                    .align(Alignment.BottomStart)
+                    .padding(start = 14.dp, bottom = 92.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(surfaceColor.copy(alpha = 0.85f))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = MarineGeoUtils.formatDistance(scaleBarMeters, settings.distanceUnit),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = textPrimaryColor
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Box(
+                    modifier = Modifier
+                        .width(scaleBarWidthDp)
+                        .height(3.dp)
+                        .background(primaryColor)
+                )
+            }
         }
 
         // BOTTOM FLOATING HUD: Curated Spot Gacor Detail Card OR Active Route & Target Card
@@ -1746,6 +1889,21 @@ fun ChartplotterScreen(
                 zoom = if (spot.accessType == SpotAccessType.SHORE) 15.0 else 13.5
             },
             onDismiss = { showSpotAtlasDialog = false }
+        )
+    }
+
+    if (showSearchDialog) {
+        MapLocationSearchDialog(
+            onSelectLocation = { loc ->
+                showSearchDialog = false
+                followVessel = false
+                selectedHotspot = null
+                searchedPin = loc
+                centerLat = loc.latitude
+                centerLon = loc.longitude
+                zoom = loc.suggestedZoom.coerceAtMost(activeLayer.maxZoom.toDouble())
+            },
+            onDismiss = { showSearchDialog = false }
         )
     }
 

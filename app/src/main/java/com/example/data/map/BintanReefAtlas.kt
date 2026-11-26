@@ -45,7 +45,8 @@ data class BintanHotspot(
     val bestBait: String,
     val bestTide: String,
     val castTip: String,
-    val popularityNote: String
+    val popularityNote: String,
+    val isBintanCore: Boolean = true
 )
 
 /**
@@ -174,6 +175,67 @@ object BintanReefAtlas {
             bottomType = ReefBottomType.DROP_OFF,
             depthRangeLabel = "10–24 m",
             description = "Pertemuan palung selat berarus kencang dengan karang tepi Pulau Mantang."
+        ),
+        // === ZONA KARANG KEPRI LAINNYA (BATAM, KARIMUN, LINGGA, ANAMBAS, NATUNA) ===
+        BintanReefZone(
+            id = "reef_batam_abang",
+            name = "Terumbu Karang Pulau Abang (Batam)",
+            centerLat = 0.568,
+            centerLon = 104.224,
+            radiusMeters = 2800.0,
+            bottomType = ReefBottomType.CORAL_REEF,
+            depthRangeLabel = "4–22 m",
+            description = "Taman terumbu karang paling subur di selatan Batam — surga Kerapu, Kakap & Baronang."
+        ),
+        BintanReefZone(
+            id = "reef_batam_nongsa",
+            name = "Karang Putri & Pesisir Nongsa (Batam)",
+            centerLat = 1.196,
+            centerLon = 104.104,
+            radiusMeters = 2000.0,
+            bottomType = ReefBottomType.ROCKY_HEADLAND,
+            depthRangeLabel = "3–14 m",
+            description = "Karang tepi utara Batam menghadap Selat Singapura dengan arus hidup."
+        ),
+        BintanReefZone(
+            id = "reef_karimun_pelawan",
+            name = "Karang Pelawan & Pongkar (Karimun)",
+            centerLat = 1.095,
+            centerLon = 103.362,
+            radiusMeters = 2200.0,
+            bottomType = ReefBottomType.ROCKY_HEADLAND,
+            depthRangeLabel = "3–16 m",
+            description = "Tebing batu granit dan karang pesisir utara Pulau Karimun Besar."
+        ),
+        BintanReefZone(
+            id = "reef_lingga_benan",
+            name = "Karang Pulau Benan & Senayang (Lingga)",
+            centerLat = 0.455,
+            centerLon = 104.455,
+            radiusMeters = 2600.0,
+            bottomType = ReefBottomType.CORAL_REEF,
+            depthRangeLabel = "5–20 m",
+            description = "Gugusan terumbu karang jernih jalur utara Kabupaten Lingga."
+        ),
+        BintanReefZone(
+            id = "reef_anambas_tarempa",
+            name = "Karang Teluk Tarempa (Anambas)",
+            centerLat = 3.225,
+            centerLon = 106.215,
+            radiusMeters = 3000.0,
+            bottomType = ReefBottomType.DROP_OFF,
+            depthRangeLabel = "10–40 m",
+            description = "Tubir karang dalam perairan jernih Kepulauan Anambas, habitat GT & Kerapu Sunu."
+        ),
+        BintanReefZone(
+            id = "reef_natuna_sindu",
+            name = "Batu Sindu & Karang Ranai (Natuna)",
+            centerLat = 3.968,
+            centerLon = 108.404,
+            radiusMeters = 2800.0,
+            bottomType = ReefBottomType.DROP_OFF,
+            depthRangeLabel = "8–38 m",
+            description = "Tanjung granit raksasa dan karang laut lepas Ranai, Natuna."
         )
     )
 
@@ -436,6 +498,144 @@ object BintanReefAtlas {
             bestTide = "Saat arus mulai melambat (peralihan pasang/surut)",
             castTip = "Gunakan timah berat J8–J12 saat arus selat kuat agar umpan menyentuh dasar.",
             popularityNote = "Palung dalam & pertemuan arus favorit pemancing Kijang."
+        ),
+
+        // === SPOT KEPRI LAINNYA (BATAM, KARIMUN, LINGGA, ANAMBAS, NATUNA) ===
+        BintanHotspot(
+            id = "spot_batam_barelang_4",
+            name = "Jembatan 4–5 Barelang (Arus Selat)",
+            area = "Batam",
+            latitude = 0.8715,
+            longitude = 104.1422,
+            accessType = SpotAccessType.SHORE,
+            bottomType = ReefBottomType.DROP_OFF,
+            depthRange = "5–16 m",
+            depthMetersEstimate = 10.0,
+            targetFish = "Kakap Putih, Kerapu, Kurau, Talang-talang",
+            bestBait = "Udang putih hidup, belanak hidup, soft lure shad",
+            bestTide = "Arus pasang naik sedang / awal surut",
+            castTip = "Incar pusaran air balik di sisi batu penahan jembatan atau bawah selat.",
+            popularityNote = "Spot mancing paling legendaris di Batam & mudah dijangkau darat.",
+            isBintanCore = false
+        ),
+        BintanHotspot(
+            id = "spot_batam_nongsa",
+            name = "Pantai Nongsa & Karang Putri",
+            area = "Batam",
+            latitude = 1.1965,
+            longitude = 104.1045,
+            accessType = SpotAccessType.SHORE,
+            bottomType = ReefBottomType.ROCKY_HEADLAND,
+            depthRange = "2–7 m",
+            depthMetersEstimate = 4.5,
+            targetFish = "Kerapu Karang, Baronang, Baby GT, Todak",
+            bestBait = "Udang hidup, cumi iris, micro jig 10–15g",
+            bestTide = "Pasang naik pagi & sore",
+            castTip = "Lempar ke tepi karang sebelah utara pantai sebelum alur kapal.",
+            popularityNote = "Spot pinggir populer di timur laut Batam menghadap Singapura.",
+            isBintanCore = false
+        ),
+        BintanHotspot(
+            id = "spot_batam_pulau_abang",
+            name = "Terumbu Karang Pulau Abang",
+            area = "Selatan Batam",
+            latitude = 0.5682,
+            longitude = 104.2245,
+            accessType = SpotAccessType.BOAT,
+            bottomType = ReefBottomType.CORAL_REEF,
+            depthRange = "6–22 m",
+            depthMetersEstimate = 13.0,
+            targetFish = "Kerapu Sunu, Kakap Merah, GT, Jenaha",
+            bestBait = "Cumi hidup, udang besar, slow jig 40–60g",
+            bestTide = "Pasang naik hingga puncak pasang",
+            castTip = "Mainkan jig ringan tepat 2 meter di atas hamparan karang hidup.",
+            popularityNote = "Pusat wisata & karang paling subur di gugusan Barelang Batam.",
+            isBintanCore = false
+        ),
+        BintanHotspot(
+            id = "spot_karimun_pelawan",
+            name = "Pantai Pelawan & Batu Pongkar",
+            area = "Tanjung Balai Karimun",
+            latitude = 1.0952,
+            longitude = 103.3625,
+            accessType = SpotAccessType.SHORE,
+            bottomType = ReefBottomType.ROCKY_HEADLAND,
+            depthRange = "2–8 m",
+            depthMetersEstimate = 5.0,
+            targetFish = "Kerapu, Kakap Batu, Sembilang, Talang-talang",
+            bestBait = "Udang hidup, sotong potong, minnow 8 cm",
+            bestTide = "Pasang naik sore hari",
+            castTip = "Lempar menyusuri tanjung batu granit menuju batas arus Selat Malaka.",
+            popularityNote = "Spot mancing pinggir favorit warga Tanjung Balai Karimun.",
+            isBintanCore = false
+        ),
+        BintanHotspot(
+            id = "spot_lingga_benan",
+            name = "Karang Pulau Benan & Senayang",
+            area = "Lingga Utara",
+            latitude = 0.4555,
+            longitude = 104.4552,
+            accessType = SpotAccessType.BOAT,
+            bottomType = ReefBottomType.CORAL_REEF,
+            depthRange = "5–20 m",
+            depthMetersEstimate = 12.0,
+            targetFish = "Kerapu, Kakap Merah, Tenggiri, Kuwe",
+            bestBait = "Selar hidup, cumi segar, metal jig 40–80g",
+            bestTide = "Arus hidup pasang naik pagi",
+            castTip = "Susuri sisi tubir timur Pulau Benan dengan teknik dasaran atau jigging.",
+            popularityNote = "Air super jernih & terumbu karang luas di jalur Bintan–Lingga.",
+            isBintanCore = false
+        ),
+        BintanHotspot(
+            id = "spot_lingga_daik",
+            name = "Muara & Pelabuhan Daik Lingga",
+            area = "Pulau Lingga",
+            latitude = -0.2185,
+            longitude = 104.6420,
+            accessType = SpotAccessType.SHORE,
+            bottomType = ReefBottomType.SEAGRASS_SAND,
+            depthRange = "3–9 m",
+            depthMetersEstimate = 5.5,
+            targetFish = "Kakap Putih, Senangin, Kurau, Sembilang",
+            bestBait = "Udang putih hidup, tamban potong",
+            bestTide = "Pasang naik malam & subuh",
+            castTip = "Gunakan teknik pelampung hanyut di ujung dermaga saat air mulai masuk.",
+            popularityNote = "Spot pinggir dermaga paling ramai di Kabupaten Lingga.",
+            isBintanCore = false
+        ),
+        BintanHotspot(
+            id = "spot_anambas_tarempa",
+            name = "Karang Batu Tompak & Tarempa",
+            area = "Kepulauan Anambas",
+            latitude = 3.2255,
+            longitude = 106.2155,
+            accessType = SpotAccessType.BOAT,
+            bottomType = ReefBottomType.DROP_OFF,
+            depthRange = "10–40 m",
+            depthMetersEstimate = 22.0,
+            targetFish = "GT, Ruby Snapper, Kerapu Sunu, Tuna Gigi Anjing",
+            bestBait = "Popper 80g, jig 100–150g, tongkol iris",
+            bestTide = "Arus sedang pasang naik",
+            castTip = "Jigging di bibir tubir laut dalam sekitar luar Teluk Tarempa.",
+            popularityNote = "Spot kelas berat di Kepulauan Anambas.",
+            isBintanCore = false
+        ),
+        BintanHotspot(
+            id = "spot_natuna_batu_sindu",
+            name = "Tanjung Batu Sindu (Ranai)",
+            area = "Natuna",
+            latitude = 3.9685,
+            longitude = 108.4045,
+            accessType = SpotAccessType.SHORE,
+            bottomType = ReefBottomType.ROCKY_HEADLAND,
+            depthRange = "4–14 m",
+            depthMetersEstimate = 8.0,
+            targetFish = "GT, Tenggiri, Talang-talang, Kerapu Karang",
+            bestBait = "Metal jig 30–60g, stickbait, cumi segar",
+            bestTide = "Musim teduh saat pasang naik pagi",
+            castTip = "Rock fishing dari batu granit datar yang aman dengan leader 40 lb.",
+            popularityNote = "Ikon spot rock fishing & karang terkenal di Ranai Natuna.",
+            isBintanCore = false
         )
     )
 

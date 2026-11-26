@@ -16,7 +16,8 @@
     <string name="map_layer_bathymetry">Batimetri</string>
     <string name="map_layer_osm">OSM</string>
     <string name="map_overlay_reefs_spots">Karang &amp; Spot</string>
-    <string name="map_spot_atlas_button">Daftar Spot (16)</string>
+    <string name="map_spot_atlas_button">Daftar Spot (24)</string>
+    <string name="map_search_location">Cari Lokasi</string>
     <string name="map_overlay_openseamap">OpenSeaMap</string>
     <string name="map_overlay_storm_radar">+ Radar Badai</string>
     <string name="map_casting_rings">Jarak Lempar</string>
